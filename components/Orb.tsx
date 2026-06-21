@@ -203,13 +203,14 @@ export default function Orb({ state, amplitude = 0, onTap }: OrbProps) {
     canvas.addEventListener("pointerup", onPointerUp);
     canvas.addEventListener("pointercancel", onPointerCancel);
 
-    const clock = new THREE.Clock();
+    const timer = new THREE.Timer();
     let frameId = 0;
     let running = true;
 
     const frame = () => {
+      timer.update();
       // Clamp dt so a long hidden-tab pause does not jump the animation.
-      const dt = Math.min(clock.getDelta(), 0.05);
+      const dt = Math.min(timer.getDelta(), 0.05);
       uniforms.uTime.value += dt;
 
       const target = targetRef.current;
@@ -277,7 +278,7 @@ export default function Orb({ state, amplitude = 0, onTap }: OrbProps) {
         cancelAnimationFrame(frameId);
       } else if (!running) {
         running = true;
-        clock.getDelta(); // discard the idle gap
+        timer.update(); // discard the idle gap
         frameId = requestAnimationFrame(frame);
       }
     };
