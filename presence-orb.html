@@ -1,0 +1,374 @@
+<!-- Presence Orb — a point-cloud sphere as a body for an LLM.
+     Drag to rotate · tap the orb to send a ripple · switch its state below. -->
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>Presence Orb</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
+<style>
+  :root{
+    --ink:#07090E; --ink-2:#0B0F18;
+    --text:#C9D2E0; --muted:#5E6A7E; --line:rgba(140,160,190,.14);
+    --glow:#2BD6C6;
+    --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+    --disp:"Space Grotesk",system-ui,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--ink);color:var(--text);
+    font-family:var(--disp);overflow:hidden;-webkit-tap-highlight-color:transparent}
+  /* ambient backdrop: a faint breathing halo behind the canvas */
+  .stage{position:fixed;inset:0}
+  .halo{position:absolute;inset:0;pointer-events:none;
+    background:radial-gradient(60% 60% at 50% 46%, color-mix(in srgb,var(--glow) 14%, transparent) 0%, transparent 60%);
+    transition:background .8s ease;filter:blur(8px)}
+  canvas{display:block;position:absolute;inset:0;touch-action:none}
+
+  /* wordmark + live readout */
+  .top{position:fixed;top:0;left:0;right:0;padding:20px 22px;display:flex;
+    justify-content:space-between;align-items:flex-start;pointer-events:none;z-index:5}
+  .mark{font-weight:600;letter-spacing:.02em;font-size:15px}
+  .mark small{display:block;font-family:var(--mono);font-size:10.5px;color:var(--muted);
+    letter-spacing:.18em;text-transform:uppercase;margin-top:3px}
+  .readout{font-family:var(--mono);font-size:11px;color:var(--muted);text-align:right;line-height:1.7}
+  .readout b{color:var(--text);font-weight:500}
+  .dot{display:inline-block;width:6px;height:6px;border-radius:50%;
+    background:var(--glow);box-shadow:0 0 10px var(--glow);transform:translateY(-1px);margin-left:6px;
+    transition:background .6s ease, box-shadow .6s ease}
+
+  /* state rail */
+  .rail{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);z-index:5;
+    display:flex;gap:4px;padding:5px;border:1px solid var(--line);border-radius:999px;
+    background:color-mix(in srgb,var(--ink-2) 70%, transparent);
+    backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
+  .rail button{appearance:none;border:0;cursor:pointer;color:var(--muted);
+    font-family:var(--mono);font-size:11.5px;letter-spacing:.06em;
+    padding:9px 16px;border-radius:999px;background:transparent;transition:color .25s, background .25s}
+  .rail button:hover{color:var(--text)}
+  .rail button[aria-pressed="true"]{color:var(--ink);background:var(--text)}
+  .rail button:focus-visible{outline:2px solid var(--glow);outline-offset:2px}
+
+  .hint{position:fixed;left:50%;bottom:70px;transform:translateX(-50%);z-index:5;
+    font-family:var(--mono);font-size:10.5px;color:var(--muted);letter-spacing:.05em;
+    opacity:.75;pointer-events:none;text-align:center}
+
+  @media (max-width:520px){
+    .rail button{padding:8px 11px;font-size:10.5px;letter-spacing:.03em}
+    .readout{font-size:10px}
+  }
+</style>
+
+<div class="stage">
+  <div class="halo" id="halo"></div>
+  <canvas id="c"></canvas>
+</div>
+
+<div class="top">
+  <div class="mark">Presence<small>orb · v1</small></div>
+  <div class="readout">
+    state <b id="rState">idle</b><span class="dot" id="rDot"></span><br/>
+    energy <b id="rEnergy">0.12</b><br/>
+    dots <b>4200</b>
+  </div>
+</div>
+
+<div class="hint" id="hint">drag to rotate · tap the orb</div>
+
+<div class="rail" role="group" aria-label="model state">
+  <button data-state="idle" aria-pressed="true">idle</button>
+  <button data-state="listening" aria-pressed="false">listening</button>
+  <button data-state="thinking" aria-pressed="false">thinking</button>
+  <button data-state="responding" aria-pressed="false">responding</button>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(function () {
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const motion = reduced ? 0.45 : 1;
+
+  const R = 1.25, COUNT = 4200;
+  const canvas = document.getElementById('c');
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+  renderer.setClearColor(0x000000, 0);
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
+  camera.position.set(0, 0, 3.7);
+
+  // rotating group holds both the visible points and an invisible raycast shell
+  const group = new THREE.Group();
+  scene.add(group);
+
+  // --- Fibonacci sphere: even distribution of dots over the surface ---
+  const positions = new Float32Array(COUNT * 3);
+  const randoms = new Float32Array(COUNT);
+  const golden = Math.PI * (3 - Math.sqrt(5));
+  for (let i = 0; i < COUNT; i++) {
+    const y = 1 - (i / (COUNT - 1)) * 2;
+    const r = Math.sqrt(1 - y * y);
+    const t = golden * i;
+    positions[i*3]   = Math.cos(t) * r * R;
+    positions[i*3+1] = y * R;
+    positions[i*3+2] = Math.sin(t) * r * R;
+    randoms[i] = Math.random();
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geo.setAttribute('aRandom', new THREE.BufferAttribute(randoms, 1));
+
+  const uniforms = {
+    uTime:        { value: 0 },
+    uBreath:      { value: 0.06 },
+    uBreathSpeed: { value: 1.1 },
+    uWobbleAmp:   { value: 0.05 },
+    uWobbleFreq:  { value: 1.6 },
+    uWobbleSpeed: { value: 0.25 },
+    uSize:        { value: 14.0 },
+    uPixelRatio:  { value: Math.min(devicePixelRatio, 2) },
+    uEnergy:      { value: 0.12 },
+    uClickDir:    { value: new THREE.Vector3(0, 1, 0) },
+    uClickTime:   { value: -10 },
+    uColorA:      { value: new THREE.Color(0x2BD6C6) },
+    uColorB:      { value: new THREE.Color(0x7C5CFF) },
+  };
+
+  const vert = `
+    uniform float uTime, uBreath, uBreathSpeed, uWobbleAmp, uWobbleFreq, uWobbleSpeed;
+    uniform float uSize, uPixelRatio, uEnergy, uClickTime;
+    uniform vec3  uClickDir;
+    attribute float aRandom;
+    varying float vDisp; varying float vRand;
+
+    // Ashima simplex noise 3D
+    vec4 permute(vec4 x){return mod(((x*34.0)+1.0)*x,289.0);}
+    vec4 taylorInvSqrt(vec4 r){return 1.79284291400159 - 0.85373472095314 * r;}
+    float snoise(vec3 v){
+      const vec2 C = vec2(1.0/6.0, 1.0/3.0);
+      const vec4 D = vec4(0.0,0.5,1.0,2.0);
+      vec3 i  = floor(v + dot(v, C.yyy));
+      vec3 x0 = v - i + dot(i, C.xxx);
+      vec3 g = step(x0.yzx, x0.xyz);
+      vec3 l = 1.0 - g;
+      vec3 i1 = min(g.xyz, l.zxy);
+      vec3 i2 = max(g.xyz, l.zxy);
+      vec3 x1 = x0 - i1 + 1.0*C.xxx;
+      vec3 x2 = x0 - i2 + 2.0*C.xxx;
+      vec3 x3 = x0 - 1.0 + 3.0*C.xxx;
+      i = mod(i, 289.0);
+      vec4 p = permute(permute(permute(
+                 i.z + vec4(0.0, i1.z, i2.z, 1.0))
+               + i.y + vec4(0.0, i1.y, i2.y, 1.0))
+               + i.x + vec4(0.0, i1.x, i2.x, 1.0));
+      float n_ = 1.0/7.0;
+      vec3 ns = n_ * D.wyz - D.xzx;
+      vec4 j = p - 49.0 * floor(p * ns.z * ns.z);
+      vec4 x_ = floor(j * ns.z);
+      vec4 y_ = floor(j - 7.0 * x_);
+      vec4 x = x_ * ns.x + ns.yyyy;
+      vec4 y = y_ * ns.x + ns.yyyy;
+      vec4 h = 1.0 - abs(x) - abs(y);
+      vec4 b0 = vec4(x.xy, y.xy);
+      vec4 b1 = vec4(x.zw, y.zw);
+      vec4 s0 = floor(b0)*2.0 + 1.0;
+      vec4 s1 = floor(b1)*2.0 + 1.0;
+      vec4 sh = -step(h, vec4(0.0));
+      vec4 a0 = b0.xzyw + s0.xzyw*sh.xxyy;
+      vec4 a1 = b1.xzyw + s1.xzyw*sh.zzww;
+      vec3 p0 = vec3(a0.xy, h.x);
+      vec3 p1 = vec3(a0.zw, h.y);
+      vec3 p2 = vec3(a1.xy, h.z);
+      vec3 p3 = vec3(a1.zw, h.w);
+      vec4 norm = taylorInvSqrt(vec4(dot(p0,p0),dot(p1,p1),dot(p2,p2),dot(p3,p3)));
+      p0*=norm.x; p1*=norm.y; p2*=norm.z; p3*=norm.w;
+      vec4 m = max(0.6 - vec4(dot(x0,x0),dot(x1,x1),dot(x2,x2),dot(x3,x3)), 0.0);
+      m = m*m;
+      return 42.0 * dot(m*m, vec4(dot(p0,x0),dot(p1,x1),dot(p2,x2),dot(p3,x3)));
+    }
+
+    void main(){
+      vec3 dir = normalize(position);
+      float n = snoise(dir * uWobbleFreq + vec3(uTime * uWobbleSpeed));
+      float breathe = sin(uTime * uBreathSpeed) * uBreath;
+
+      // travelling wave emanating from the tapped point
+      float ripple = 0.0;
+      float t = uTime - uClickTime;
+      if (t > 0.0 && t < 2.6){
+        float ang = acos(clamp(dot(dir, uClickDir), -1.0, 1.0)); // 0..PI
+        float front = t * 1.7;
+        float env = exp(-t * 1.4) * exp(-pow((ang - front), 2.0) * 5.0);
+        ripple = sin(ang * 7.0 - t * 7.0) * env * 0.4;
+      }
+
+      float disp = n * (uWobbleAmp + uEnergy * 0.04) + breathe + ripple;
+      vDisp = disp; vRand = aRandom;
+
+      vec3 newPos = dir * (length(position) + disp);
+      vec4 mv = modelViewMatrix * vec4(newPos, 1.0);
+      gl_Position = projectionMatrix * mv;
+
+      float size = uSize * (0.45 + aRandom * 0.85)
+                 * (1.0 + uEnergy * 0.7 + abs(ripple) * 2.2);
+      gl_PointSize = size * uPixelRatio * (1.0 / -mv.z);
+    }
+  `;
+
+  const frag = `
+    precision highp float;
+    uniform vec3 uColorA, uColorB;
+    uniform float uEnergy, uTime;
+    varying float vDisp; varying float vRand;
+    void main(){
+      vec2 c = gl_PointCoord - 0.5;
+      float d = length(c);
+      if (d > 0.5) discard;
+      float alpha = smoothstep(0.5, 0.08, d);
+      float mixv = clamp(vDisp * 2.2 + 0.5, 0.0, 1.0);
+      vec3 col = mix(uColorA, uColorB, mixv);
+      // gentle per-dot flicker that grows with energy (the "thinking" shimmer)
+      float flick = 0.82 + 0.18 * sin(uTime * (6.0 + uEnergy * 14.0) + vRand * 40.0);
+      alpha *= mix(0.9, flick, uEnergy);
+      gl_FragColor = vec4(col, alpha * 0.9);
+    }
+  `;
+
+  const mat = new THREE.ShaderMaterial({
+    uniforms, vertexShader: vert, fragmentShader: frag,
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+  });
+  const points = new THREE.Points(geo, mat);
+  group.add(points);
+
+  // invisible shell used only for raycasting taps onto the surface
+  const shell = new THREE.Mesh(
+    new THREE.SphereGeometry(R, 24, 24),
+    new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false })
+  );
+  group.add(shell);
+
+  // --- state presets: the LLM interaction lifecycle ---
+  const STATES = {
+    idle:       { energy:.12, breath:.06, bSpeed:1.0, wAmp:.05, wFreq:1.6, wSpeed:.25, rot:.0016, a:0x2BD6C6, b:0x7C5CFF, glow:'#2BD6C6' },
+    listening:  { energy:.42, breath:.10, bSpeed:1.4, wAmp:.055,wFreq:2.0, wSpeed:.55, rot:.0024, a:0x3FE0D2, b:0x5EF0E4, glow:'#5EF0E4' },
+    thinking:   { energy:.9,  breath:.05, bSpeed:1.2, wAmp:.14, wFreq:3.4, wSpeed:1.5, rot:.0062, a:0x7C5CFF, b:0xB07CFF, glow:'#B07CFF' },
+    responding: { energy:.62, breath:.17, bSpeed:3.2, wAmp:.07, wFreq:2.2, wSpeed:.8,  rot:.0032, a:0xFF9E5C, b:0xFF6FA5, glow:'#FF8A5C' },
+  };
+  let target = STATES.idle;
+  let autoRot = STATES.idle.rot * motion;
+
+  const rState = document.getElementById('rState');
+  const rEnergy = document.getElementById('rEnergy');
+  const rDot = document.getElementById('rDot');
+  const halo = document.getElementById('halo');
+
+  function setState(name){
+    target = STATES[name];
+    autoRot = target.rot * motion;
+    rState.textContent = name;
+    rDot.style.background = target.glow;
+    rDot.style.boxShadow = '0 0 10px ' + target.glow;
+    document.documentElement.style.setProperty('--glow', target.glow);
+    document.querySelectorAll('.rail button').forEach(btn =>
+      btn.setAttribute('aria-pressed', String(btn.dataset.state === name)));
+  }
+  document.querySelectorAll('.rail button').forEach(btn =>
+    btn.addEventListener('click', () => setState(btn.dataset.state)));
+
+  // --- pointer: drag to orbit, tap to ripple ---
+  const ray = new THREE.Raycaster();
+  const ndc = new THREE.Vector2();
+  let down = null, dragging = false;
+  let rotX = 0, rotY = 0, velX = 0, velY = 0;
+  const hint = document.getElementById('hint');
+
+  canvas.addEventListener('pointerdown', (e) => {
+    down = { x: e.clientX, y: e.clientY, t: performance.now() };
+    dragging = true; velX = velY = 0;
+    canvas.setPointerCapture && canvas.setPointerCapture(e.pointerId);
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    if (!dragging || !down) return;
+    const dx = e.movementX || 0, dy = e.movementY || 0;
+    velY = dx * 0.005; velX = dy * 0.005;
+    rotY += velY; rotX += velX;
+    rotX = Math.max(-1.2, Math.min(1.2, rotX));
+  });
+  canvas.addEventListener('pointerup', (e) => {
+    dragging = false;
+    if (!down) return;
+    const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y);
+    const dt = performance.now() - down.t;
+    if (moved < 7 && dt < 400) tap(e.clientX, e.clientY);
+    down = null;
+  });
+  canvas.addEventListener('pointercancel', () => { dragging = false; down = null; });
+
+  function tap(cx, cy){
+    const rect = canvas.getBoundingClientRect();
+    ndc.x = ((cx - rect.left) / rect.width) * 2 - 1;
+    ndc.y = -((cy - rect.top) / rect.height) * 2 + 1;
+    ray.setFromCamera(ndc, camera);
+    const hits = ray.intersectObject(shell, false);
+    if (hits.length){
+      const local = group.worldToLocal(hits[0].point.clone()).normalize();
+      uniforms.uClickDir.value.copy(local);
+      uniforms.uClickTime.value = uniforms.uTime.value;
+      if (hint) hint.style.opacity = '0';
+    }
+  }
+
+  // --- resize ---
+  function resize(){
+    const w = innerWidth, h = innerHeight;
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h; camera.updateProjectionMatrix();
+    uniforms.uPixelRatio.value = Math.min(devicePixelRatio, 2);
+    uniforms.uSize.value = Math.max(10, Math.min(16, w / 90));
+  }
+  addEventListener('resize', resize); resize();
+
+  // --- loop ---
+  const lerp = (a, b, n) => a + (b - a) * n;
+  const clock = new THREE.Clock();
+  function frame(){
+    const dt = clock.getDelta();
+    uniforms.uTime.value += dt;
+
+    // ease every animated parameter toward the active state
+    const s = 0.06;
+    uniforms.uEnergy.value      = lerp(uniforms.uEnergy.value, target.energy, s);
+    uniforms.uBreath.value      = lerp(uniforms.uBreath.value, target.breath * motion, s);
+    uniforms.uBreathSpeed.value = lerp(uniforms.uBreathSpeed.value, target.bSpeed, s);
+    uniforms.uWobbleAmp.value   = lerp(uniforms.uWobbleAmp.value, target.wAmp * motion, s);
+    uniforms.uWobbleFreq.value  = lerp(uniforms.uWobbleFreq.value, target.wFreq, s);
+    uniforms.uWobbleSpeed.value = lerp(uniforms.uWobbleSpeed.value, target.wSpeed, s);
+    uniforms.uColorA.value.lerp(new THREE.Color(target.a), s);
+    uniforms.uColorB.value.lerp(new THREE.Color(target.b), s);
+
+    // inertial drag + ambient auto-rotation
+    if (!dragging){ rotY += velY; rotX += velX; velX *= 0.94; velY *= 0.94; rotY += autoRot; }
+    group.rotation.y = lerp(group.rotation.y, rotY, 0.12);
+    group.rotation.x = lerp(group.rotation.x, rotX, 0.12);
+
+    rEnergy.textContent = uniforms.uEnergy.value.toFixed(2);
+    halo.style.background =
+      'radial-gradient(60% 60% at 50% 46%, ' +
+      'color-mix(in srgb, var(--glow) ' + Math.round(8 + uniforms.uEnergy.value * 22) + '%, transparent) 0%, transparent 60%)';
+
+    renderer.render(scene, camera);
+    requestAnimationFrame(frame);
+  }
+  frame();
+
+  /* Wiring to a real model — drive setState() from your LLM client:
+       onMicOpen      -> setState('listening')
+       onRequestStart -> setState('thinking')
+       onFirstToken   -> setState('responding')
+       onStreamEnd    -> setState('idle')
+     and call tap(x,y) (or set uClickDir/uClickTime) on any user input event
+     you want the orb to physically acknowledge. */
+})();
+</script>
