@@ -1,0 +1,35 @@
+@import "tailwindcss";
+
+:root {
+  --ink: #07090e;
+  --ink-2: #0b0f18;
+  --text: #c9d2e0;
+  --muted: #5e6a7e;
+  --line: rgba(140, 160, 190, 0.14);
+  --glow: #2bd6c6;
+}
+
+@theme inline {
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-text: var(--text);
+  --color-muted: var(--muted);
+  --font-display: var(--font-space-grotesk);
+  --font-mono: var(--font-plex-mono);
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--ink);
+  color: var(--text);
+  font-family: var(--font-display), system-ui, sans-serif;
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* The orb canvas owns pointer gestures so dragging it never scrolls the page. */
+canvas {
+  touch-action: none;
+}
