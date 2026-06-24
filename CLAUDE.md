@@ -40,6 +40,7 @@ Meriza is a presence-first conversational AI interface. The signature is a livin
 - Respect `prefers-reduced-motion` (cut rotation, reduce breath and wobble).
 - Performance scaling is required: cap devicePixelRatio at 2, use a lower point count on mobile (around 2,200 vs around 4,200 on desktop), and pause the render loop when the tab is hidden.
 - `touch-action: none` on the canvas so dragging the orb does not scroll the page, while the transcript still scrolls.
+- Amplitude contract: every amplitude source (idle, text motion score, future audio analyser) emits a per-frame target on an identical 0..1 scale (0 resting, 1 peak); smoothing and the frame loop live in the consumer, not in the source; the active source can change mid-utterance. New sources must drop in without changing the orb.
 
 ## Scope guardrails (Phase 1 only)
 
