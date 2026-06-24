@@ -4,22 +4,32 @@ import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { fragmentShader, vertexShader } from "@/lib/orb/shaders";
 import { ORB_STATES, type OrbStatePreset } from "@/lib/orb/states";
+import type { MotionFrame } from "@/lib/orb/motion/types";
 import type { OrbState } from "@/lib/types";
 
 interface OrbProps {
   state: OrbState;
-  /** 0..1 live energy, used in Phase 2 to drive the orb from audio. */
+  /** 0..1 live energy, used to drive the orb from audio. */
   amplitude?: number;
+  /**
+   * Per-frame motion drive, pulled once each rendered frame. Returning a frame
+   * overrides amplitude and wobble and can fire a ripple; null falls back to
+   * the active state preset. Lets a motion source play in the orb's own loop.
+   */
+  onFrame?: (elapsedSeconds: number) => MotionFrame | null;
   /** Fires on a tap or click that lands on the orb surface. */
   onTap?: () => void;
 }
 
 const RADIUS = 1.25;
+const WOBBLE_MIN = 1.6;
+const WOBBLE_MAX = 3.4;
 const clamp = (min: number, max: number, value: number) =>
   Math.max(min, Math.min(max, value));
 const lerp = (a: number, b: number, n: number) => a + (b - a) * n;
+const mapWobble = (w: number) => WOBBLE_MIN + (WOBBLE_MAX - WOBBLE_MIN) * w;
 
-export default function Orb({ state, amplitude = 0, onTap }: OrbProps) {
+export default function Orb({ state, amplitude = 0, onFrame, onTap }: OrbProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const haloRef = useRef<HTMLDivElement>(null);
@@ -27,6 +37,7 @@ export default function Orb({ state, amplitude = 0, onTap }: OrbProps) {
   // Mutable values the render loop reads without re-running the setup effect.
   const targetRef = useRef<OrbStatePreset>(ORB_STATES[state]);
   const amplitudeRef = useRef(amplitude);
+  const onFrameRef = useRef(onFrame);
   const onTapRef = useRef(onTap);
 
   useEffect(() => {
@@ -35,6 +46,9 @@ export default function Orb({ state, amplitude = 0, onTap }: OrbProps) {
   useEffect(() => {
     amplitudeRef.current = amplitude;
   }, [amplitude]);
+  useEffect(() => {
+    onFrameRef.current = onFrame;
+  }, [onFrame]);
   useEffect(() => {
     onTapRef.current = onTap;
   }, [onTap]);
@@ -215,7 +229,13 @@ export default function Orb({ state, amplitude = 0, onTap }: OrbProps) {
 
       const target = targetRef.current;
       const s = 0.06;
-      const energyTarget = Math.max(target.energy, amplitudeRef.current);
+
+      // Pull the active motion source (if any) inside the orb's own loop, so
+      // playback uses one frame loop and pauses with the tab. Reduced motion
+      // damps the performance and suppresses its ripples.
+      const drive = onFrameRef.current?.(uniforms.uTime.value) ?? null;
+      const driveAmp = drive ? drive.amplitude * motion : amplitudeRef.current;
+      const energyTarget = Math.max(target.energy, driveAmp);
       uniforms.uEnergy.value = lerp(uniforms.uEnergy.value, energyTarget, s);
       uniforms.uBreath.value = lerp(
         uniforms.uBreath.value,
@@ -232,11 +252,8 @@ export default function Orb({ state, amplitude = 0, onTap }: OrbProps) {
         target.wAmp * motion,
         s,
       );
-      uniforms.uWobbleFreq.value = lerp(
-        uniforms.uWobbleFreq.value,
-        target.wFreq,
-        s,
-      );
+      const freqTarget = drive ? mapWobble(drive.wobble) : target.wFreq;
+      uniforms.uWobbleFreq.value = lerp(uniforms.uWobbleFreq.value, freqTarget, s);
       uniforms.uWobbleSpeed.value = lerp(
         uniforms.uWobbleSpeed.value,
         target.wSpeed,
@@ -251,6 +268,11 @@ export default function Orb({ state, amplitude = 0, onTap }: OrbProps) {
         s,
       );
       autoRot = target.rot * motion;
+
+      if (drive?.ripple && !reduced) {
+        (uniforms.uClickDir.value as THREE.Vector3).set(0, 1, 0);
+        uniforms.uClickTime.value = uniforms.uTime.value;
+      }
 
       if (!dragging) {
         rotY += velY;
