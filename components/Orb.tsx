@@ -234,9 +234,20 @@ export default function Orb({ state, amplitude = 0, onFrame, onTap }: OrbProps) 
       // playback uses one frame loop and pauses with the tab. Reduced motion
       // damps the performance and suppresses its ripples.
       const drive = onFrameRef.current?.(uniforms.uTime.value) ?? null;
+      // A motion source owns the energy while it plays, so rests dip and peaks
+      // stand out; otherwise amplitude only lifts the state's resting energy.
+      // A driven performance also tracks faster, to read each beat rather than
+      // smearing into a constant level.
+      const driveEase = drive ? 0.2 : s;
       const driveAmp = drive ? drive.amplitude * motion : amplitudeRef.current;
-      const energyTarget = Math.max(target.energy, driveAmp);
-      uniforms.uEnergy.value = lerp(uniforms.uEnergy.value, energyTarget, s);
+      const energyTarget = drive
+        ? driveAmp
+        : Math.max(target.energy, driveAmp);
+      uniforms.uEnergy.value = lerp(
+        uniforms.uEnergy.value,
+        energyTarget,
+        driveEase,
+      );
       uniforms.uBreath.value = lerp(
         uniforms.uBreath.value,
         target.breath * motion,
@@ -253,7 +264,11 @@ export default function Orb({ state, amplitude = 0, onFrame, onTap }: OrbProps) 
         s,
       );
       const freqTarget = drive ? mapWobble(drive.wobble) : target.wFreq;
-      uniforms.uWobbleFreq.value = lerp(uniforms.uWobbleFreq.value, freqTarget, s);
+      uniforms.uWobbleFreq.value = lerp(
+        uniforms.uWobbleFreq.value,
+        freqTarget,
+        driveEase,
+      );
       uniforms.uWobbleSpeed.value = lerp(
         uniforms.uWobbleSpeed.value,
         target.wSpeed,

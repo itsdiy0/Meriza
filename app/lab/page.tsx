@@ -18,10 +18,12 @@ export default function MotionLab() {
   const sourceRef = useRef<MotionSource | null>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const onFrame = useCallback(
-    (t: number): MotionFrame | null => sourceRef.current?.frame(t) ?? null,
-    [],
-  );
+  const onFrame = useCallback((t: number): MotionFrame | null => {
+    const source = sourceRef.current;
+    if (!source || source.done) return null;
+    const frame = source.frame(t);
+    return source.done ? null : frame;
+  }, []);
 
   const stop = useCallback(() => {
     if (timeoutRef.current) clearTimeout(timeoutRef.current);
