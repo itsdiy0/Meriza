@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { OpenAICompatibleTTSProvider } from '@/lib/tts/openai-compatible';
+import type { TTSProvider } from '@/lib/tts/provider';
 
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -9,9 +10,9 @@ function requireEnv(name: string): string {
   return value;
 }
 
-let provider: OpenAICompatibleTTSProvider | null = null;
+let provider: TTSProvider | null = null;
 
-function getProvider(): OpenAICompatibleTTSProvider {
+function getProvider(): TTSProvider {
   if (!provider) {
     provider = new OpenAICompatibleTTSProvider(
       requireEnv('TTS_BASE_URL'),
@@ -41,8 +42,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Voice must be a string' }, { status: 400 });
   }
 
+  const tts = getProvider();
+  
   try {
-    const tts = getProvider();
     const audio = await tts.synthesize(text, voice);
 
     return new NextResponse(audio, {

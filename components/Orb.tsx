@@ -9,8 +9,6 @@ import type { OrbState } from "@/lib/types";
 
 interface OrbProps {
   state: OrbState;
-  /** 0..1 live energy, used to drive the orb from audio. */
-  amplitude?: number;
   /**
    * Per-frame motion drive, pulled once each rendered frame. Returning a frame
    * overrides amplitude and wobble and can fire a ripple; null falls back to
@@ -29,23 +27,19 @@ const clamp = (min: number, max: number, value: number) =>
 const lerp = (a: number, b: number, n: number) => a + (b - a) * n;
 const mapWobble = (w: number) => WOBBLE_MIN + (WOBBLE_MAX - WOBBLE_MIN) * w;
 
-export default function Orb({ state, amplitude = 0, onFrame, onTap }: OrbProps) {
+export default function Orb({ state, onFrame, onTap }: OrbProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const haloRef = useRef<HTMLDivElement>(null);
 
   // Mutable values the render loop reads without re-running the setup effect.
   const targetRef = useRef<OrbStatePreset>(ORB_STATES[state]);
-  const amplitudeRef = useRef(amplitude);
   const onFrameRef = useRef(onFrame);
   const onTapRef = useRef(onTap);
 
   useEffect(() => {
     targetRef.current = ORB_STATES[state];
   }, [state]);
-  useEffect(() => {
-    amplitudeRef.current = amplitude;
-  }, [amplitude]);
   useEffect(() => {
     onFrameRef.current = onFrame;
   }, [onFrame]);
@@ -239,10 +233,7 @@ export default function Orb({ state, amplitude = 0, onFrame, onTap }: OrbProps) 
       // A driven performance also tracks faster, to read each beat rather than
       // smearing into a constant level.
       const driveEase = drive ? 0.2 : s;
-      const driveAmp = drive ? drive.amplitude * motion : amplitudeRef.current;
-      const energyTarget = drive
-        ? driveAmp
-        : Math.max(target.energy, driveAmp);
+      const energyTarget = drive ? drive.amplitude * motion : target.energy;
       uniforms.uEnergy.value = lerp(
         uniforms.uEnergy.value,
         energyTarget,
