@@ -16,7 +16,7 @@ function getProvider(): OpenAICompatibleTTSProvider {
     provider = new OpenAICompatibleTTSProvider(
       requireEnv('TTS_BASE_URL'),
       requireEnv('TTS_MODEL'),
-      requireEnv('TTS_VOICE')
+      requireEnv('TTS_VOICE'),
     );
   }
   return provider;
@@ -33,7 +33,7 @@ export async function POST(req: NextRequest) {
 
   const { text, voice } = payload as { text?: unknown; voice?: unknown };
 
-  if (typeof text !== 'string' || text.trim().length === 0) {
+  if (typeof text !== 'string' || text.trim() === '') {
     return NextResponse.json({ error: 'Text is required' }, { status: 400 });
   }
 
@@ -42,11 +42,12 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const audio = await getProvider().synthesize(text, voice);
+    const tts = getProvider();
+    const audio = await tts.synthesize(text, voice);
 
     return new NextResponse(audio, {
       headers: {
-        'Content-Type': 'audio/wav',
+        'Content-Type': tts.contentType,
         'Content-Length': String(audio.byteLength),
         'Cache-Control': 'no-store',
       },
