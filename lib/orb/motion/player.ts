@@ -15,29 +15,25 @@ export function createScoreSource(score: Score): MotionSource {
   let lastIndex = -1;
   let finished = total === 0;
 
-  const indexAt = (elapsedSeconds: number): number => {
-    if (start === null) start = elapsedSeconds;
-    return Math.floor(((elapsedSeconds - start) * 1000) / tickMs);
-  };
-
   return {
+    id: "score",
     get done() {
       return finished;
     },
-    sample(elapsedSeconds: number): number {
-      const i = indexAt(elapsedSeconds);
-      return i >= 0 && i < total ? beats[i].amp : 0;
-    },
     frame(elapsedSeconds: number): MotionFrame {
-      const i = indexAt(elapsedSeconds);
+      if (start === null) start = elapsedSeconds;
+      const i = Math.floor(((elapsedSeconds - start) * 1000) / tickMs);
+
       if (i >= total) {
         finished = true;
         return REST;
       }
       if (i < 0) return REST;
+
       const beat = beats[i];
       const crossed = i !== lastIndex;
       lastIndex = i;
+
       return {
         amplitude: beat.amp,
         wobble: beat.freq,

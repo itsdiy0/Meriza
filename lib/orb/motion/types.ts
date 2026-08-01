@@ -1,3 +1,6 @@
+/** Identifies the active motion source. Used by the mixer during a crossfade. */
+export type MotionSourceId = "score" | "analyser";
+
 /** One step of a motion score, played at a fixed tick interval. */
 export interface Beat {
   /** Target amplitude, 0..1 (0 resting, 1 peak). */
@@ -16,7 +19,7 @@ export interface Score {
 
 /** The per-frame drive the orb consumes from an active motion source. */
 export interface MotionFrame {
-  /** 0..1 amplitude target (the shared AmplitudeSource contract). */
+  /** 0..1 amplitude target (the shared amplitude contract). */
   amplitude: number;
   /** 0..1 wobble-frequency target. */
   wobble: number;
@@ -25,16 +28,17 @@ export interface MotionFrame {
 }
 
 /**
- * The amplitude seam shared by every source (idle, score, future analyser):
- * a per-frame target on an identical 0..1 scale. The consumer owns smoothing
- * and the frame loop; the active source may change mid-utterance.
+ * The seam shared by every motion source. A source reports a raw target for
+ * the current instant and nothing else: it owns no frame loop, applies no
+ * smoothing, and holds no timers. The orb drives it from its render loop and
+ * lerps toward each result, so the active source can change mid-utterance.
+ *
+ * `frame` must be called at most once per source per rendered frame. `ripple`
+ * is edge state and a second read in the same frame consumes it.
  */
-export interface AmplitudeSource {
-  sample(elapsedSeconds: number): number;
-}
-
-/** A source that also drives wobble and ripple, and knows when it is spent. */
-export interface MotionSource extends AmplitudeSource {
-  frame(elapsedSeconds: number): MotionFrame;
+export interface MotionSource {
+  readonly id: MotionSourceId;
+  /** True once the source has nothing left to play. */
   readonly done: boolean;
+  frame(elapsedSeconds: number): MotionFrame;
 }
