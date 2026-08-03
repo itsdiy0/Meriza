@@ -1,4 +1,4 @@
-export type OrbState = "idle" | "listening" | "thinking" | "responding";
+export type OrbState = "idle" | "listening" | "thinking" | "responding" | "waiting";
 
 export type Role = "user" | "assistant";
 

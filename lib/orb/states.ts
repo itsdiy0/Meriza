@@ -61,6 +61,18 @@ export const ORB_STATES: Record<OrbState, OrbStatePreset> = {
     colorB: 0xb07cff,
     glow: "#B07CFF",
   },
+  waiting: {
+    energy: 0.3,
+    breath: 0.07,
+    bSpeed: 1.1,
+    wAmp: 0.05,
+    wFreq: 1.8,
+    wSpeed: 0.3,
+    rot: 0.002,
+    colorA: 0xff9e5c,
+    colorB: 0xff6fa5,
+    glow: "#FF8A5C",
+  },
   responding: {
     energy: 0.62,
     breath: 0.17,

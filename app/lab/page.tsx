@@ -72,11 +72,14 @@ export default function MotionLab() {
     setError(null);
     setPlaying(true);
     setOrbState("responding");
-
+    setOrbState("waiting");
     await player.unlock();
     try {
       const source = await player.speak(text, stop);
-      if (source !== null) mixer.play(source, 0.15);
+      if (source !== null) {
+        setOrbState("responding");
+        mixer.play(source, 0.15);
+      }
     } catch {
       setError("Synthesis failed");
       stop();

@@ -7,8 +7,9 @@ const AMP_HIGH = 0.42;
 const WOBBLE_LOW = 0.12;
 const WOBBLE_HIGH = 0.22;
 
-const unitSine = (t: number, hz: number) =>
-  Math.sin(t * Math.PI * 2 * hz) * 0.5 + 0.5;
+/** 0..1, starting at 0 so a fresh source enters from rest, not mid-pulse. */
+const risingSine = (t: number, hz: number) =>
+    0.5 - Math.cos(t * Math.PI * 2 * hz) * 0.5;
 
 /**
  * Holds the orb between committing to a reply and the audio arriving. A slow,
@@ -30,9 +31,9 @@ export function createWaitingSource(): MotionSource {
       const t = elapsedSeconds - start;
 
       return {
-        amplitude: AMP_LOW + (AMP_HIGH - AMP_LOW) * unitSine(t, PULSE_HZ),
+        amplitude: AMP_LOW + (AMP_HIGH - AMP_LOW) * risingSine(t, PULSE_HZ),
         wobble:
-          WOBBLE_LOW + (WOBBLE_HIGH - WOBBLE_LOW) * unitSine(t, DRIFT_HZ),
+          WOBBLE_LOW + (WOBBLE_HIGH - WOBBLE_LOW) * risingSine(t, DRIFT_HZ),
         ripple: false,
       };
     },
