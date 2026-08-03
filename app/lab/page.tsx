@@ -2,9 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Orb from "@/components/Orb";
+import { createMotionMixer, type MotionMixer } from "@/lib/orb/motion/mixer";
 import { createScoreSource } from "@/lib/orb/motion/player";
 import { textToScore } from "@/lib/orb/motion/score";
-import type { MotionFrame, MotionSource } from "@/lib/orb/motion/types";
 import type { OrbState } from "@/lib/types";
 
 const SAMPLE =
@@ -15,34 +15,32 @@ export default function MotionLab() {
   const [orbState, setOrbState] = useState<OrbState>("idle");
   const [playing, setPlaying] = useState(false);
 
-  const sourceRef = useRef<MotionSource | null>(null);
+  const mixerRef = useRef<MotionMixer | null>(null);
+  if (mixerRef.current === null) mixerRef.current = createMotionMixer();
+  const mixer = mixerRef.current;
+
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const onFrame = useCallback((t: number): MotionFrame | null => {
-    const source = sourceRef.current;
-    if (!source || source.done) return null;
-    const frame = source.frame(t);
-    return source.done ? null : frame;
-  }, []);
+  const onFrame = useCallback((t: number) => mixer.frame(t), [mixer]);
 
   const stop = useCallback(() => {
     if (timeoutRef.current) clearTimeout(timeoutRef.current);
     timeoutRef.current = null;
-    sourceRef.current = null;
+    mixer.clear();
     setPlaying(false);
     setOrbState("idle");
-  }, []);
+  }, [mixer]);
 
   const speak = useCallback(() => {
     const score = textToScore(text);
     if (score.beats.length === 0) return;
     if (timeoutRef.current) clearTimeout(timeoutRef.current);
-    sourceRef.current = createScoreSource(score);
+    mixer.play(createScoreSource(score));
     setPlaying(true);
     setOrbState("responding");
     const durationMs = score.beats.length * score.tickMs + 600;
     timeoutRef.current = setTimeout(stop, durationMs);
-  }, [text, stop]);
+  }, [text, stop, mixer]);
 
   useEffect(() => {
     return () => {
