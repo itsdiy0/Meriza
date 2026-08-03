@@ -7,6 +7,7 @@ import { createMotionMixer, type MotionMixer } from "@/lib/orb/motion/mixer";
 import { createScoreSource } from "@/lib/orb/motion/player";
 import { textToScore } from "@/lib/orb/motion/score";
 import type { OrbState } from "@/lib/types";
+import { createWaitingSource } from "@/lib/orb/motion/waiting";
 
 const SAMPLE =
   "Meriza reads this aloud in motion, not sound. Watch the orb breathe with each word.";
@@ -50,32 +51,37 @@ export default function MotionLab() {
   }, [text, mixer]);
 
   const speak = useCallback(() => {
-    const score = startScore();
-    if (score === null) return;
+    const score = textToScore(text);
+    if (score.beats.length === 0) return;
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    mixer.play(createScoreSource(score));
+    setError(null);
+    setPlaying(true);
+    setOrbState("responding");
     timeoutRef.current = setTimeout(
       stop,
       score.beats.length * score.tickMs + 600,
     );
-  }, [startScore, stop]);
+  }, [text, mixer, stop]);
 
   const speakAloud = useCallback(async () => {
-    if (startScore() === null) return;
+    if (text.trim() === "") return;
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    timeoutRef.current = null;
+    mixer.play(createWaitingSource());
+    setError(null);
+    setPlaying(true);
+    setOrbState("responding");
+
     await player.unlock();
     try {
       const source = await player.speak(text, stop);
-      if (source !== null) mixer.play(source);
+      if (source !== null) mixer.play(source, 0.15);
     } catch {
       setError("Synthesis failed");
       stop();
     }
-  }, [startScore, player, text, mixer, stop]);
-
-  useEffect(() => {
-    return () => {
-      if (timeoutRef.current) clearTimeout(timeoutRef.current);
-      player.dispose();
-    };
-  }, [player]);
+  }, [text, mixer, player, stop]);
 
   return (
     <main className="relative h-[100dvh] w-full overflow-hidden">
