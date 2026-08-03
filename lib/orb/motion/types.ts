@@ -1,5 +1,5 @@
 /** Identifies the active motion source. Used by the mixer during a crossfade. */
-export type MotionSourceId = "score" | "analyser";
+export type MotionSourceId = "waiting" | "score" | "analyser";
 
 /** One step of a motion score, played at a fixed tick interval. */
 export interface Beat {
@@ -42,3 +42,4 @@ export interface MotionSource {
   readonly done: boolean;
   frame(elapsedSeconds: number): MotionFrame;
 }
+
