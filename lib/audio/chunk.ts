@@ -8,9 +8,12 @@ const ABBREVIATIONS = new Set([
 ]);
 
 export interface ChunkLimits {
-  /** Preferred ceiling. A chunk runs to the last sentence end at or below it. */
+  /** Floor. Each request carries fixed overhead, so tiny chunks cost more
+   *  time than the audio they return. */
+  minChars: number;
+  /** Preferred ceiling. Whole sentences are packed up to it. */
   softMax: number;
-  /** Absolute ceiling. A sentence longer than this is broken at punctuation. */
+  /** Absolute ceiling. A longer sentence is divided at punctuation. */
   hardMax: number;
   /** Release whatever remains, for when no more text is coming. */
   flush: boolean;
@@ -53,13 +56,14 @@ function boundaries(text: string): number[] {
 
 /** Last comma-class break before `limit`, else the last space, else `limit`. */
 function forcedBreak(text: string, limit: number): number {
-  for (let i = limit - 1; i > 0; i--) {
+  const cap = Math.min(limit, text.length);
+  for (let i = cap - 1; i > 0; i--) {
     if (SOFT_BREAKS.has(text[i])) return i + 1;
   }
-  for (let i = limit - 1; i > 0; i--) {
+  for (let i = cap - 1; i > 0; i--) {
     if (/\s/.test(text[i])) return i;
   }
-  return limit;
+  return cap;
 }
 
 function split(buffer: string, at: number): ChunkResult {
@@ -70,10 +74,11 @@ function split(buffer: string, at: number): ChunkResult {
  * Takes one synthesizable chunk off the front of `buffer`, or null when the
  * buffer holds nothing worth sending yet.
  *
- * Both limits are ceilings, so chunk length stays predictable and synthesis
- * time with it. Whole sentences are packed up to `softMax`; a single sentence
- * that overshoots is still kept intact as long as it fits `hardMax`, and only
- * one longer than that is broken at punctuation.
+ * Chunk length is bounded on both sides so synthesis time stays predictable:
+ * whole sentences are packed up to `softMax`, and anything that would fall
+ * below `minChars` is held back for the text behind it. A sentence too long
+ * for `hardMax` is divided into even pieces rather than shaved from the
+ * front, which would leave a tail too short to be worth its own request.
  */
 export function takeChunk(
   buffer: string,
@@ -81,17 +86,24 @@ export function takeChunk(
 ): ChunkResult | null {
   if (buffer.trim() === "") return null;
 
-  const { softMax, hardMax, flush } = limits;
+  const { minChars, softMax, hardMax, flush } = limits;
   const bounds = boundaries(buffer);
 
   let at = -1;
   for (const b of bounds) {
-    if (b <= softMax) at = b;
+    if (b >= minChars && b <= softMax) at = b;
   }
   if (at === -1) {
-    at = bounds.find((b) => b <= hardMax) ?? -1;
+    at = bounds.find((b) => b >= minChars && b <= hardMax) ?? -1;
   }
   if (at !== -1) return split(buffer, at);
+
+  const end = bounds.find((b) => b >= minChars) ?? (flush ? buffer.length : -1);
+
+  if (end > hardMax) {
+    const pieces = Math.ceil(end / hardMax);
+    return split(buffer, forcedBreak(buffer, Math.ceil(end / pieces)));
+  }
 
   if (buffer.length >= hardMax) {
     return split(buffer, forcedBreak(buffer, hardMax));

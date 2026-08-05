@@ -13,7 +13,9 @@ const SMOOTHING = 0.6;
  * the latency for no gain. Matching it keeps one request to one generation.
  */
 const ENGINE_CHUNK_CHARS = 120;
+const MIN_CHUNK_CHARS = 60;
 const FIRST_CHUNK_CHARS = 70;
+const FIRST_MIN_CHUNK_CHARS = 30;
 
 const LEAD_IN_SECONDS = 0.05;
 const PREROLL_SECONDS = 1.5;
@@ -132,8 +134,10 @@ export function createSpeechPlayer(): SpeechPlayer {
 
   const drain = () => {
     for (;;) {
+      const first = chunksTaken === 0;
       const next = takeChunk(pending, {
-        softMax: chunksTaken === 0 ? FIRST_CHUNK_CHARS : ENGINE_CHUNK_CHARS,
+        minChars: first ? FIRST_MIN_CHUNK_CHARS : MIN_CHUNK_CHARS,
+        softMax: first ? FIRST_CHUNK_CHARS : ENGINE_CHUNK_CHARS,
         hardMax: ENGINE_CHUNK_CHARS,
         flush: inputClosed,
       });
