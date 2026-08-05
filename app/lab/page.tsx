@@ -68,22 +68,25 @@ export default function MotionLab() {
     if (text.trim() === "") return;
     if (timeoutRef.current) clearTimeout(timeoutRef.current);
     timeoutRef.current = null;
-    mixer.play(createWaitingSource());
+    mixer.play(createWaitingSource(), 0.6);
     setError(null);
     setPlaying(true);
-    setOrbState("responding");
     setOrbState("waiting");
+
     await player.unlock();
-    try {
-      const source = await player.speak(text, stop);
-      if (source !== null) {
+    player.start({
+      onStart: (audioSource) => {
         setOrbState("responding");
-        mixer.play(source, 0.15);
-      }
-    } catch {
-      setError("Synthesis failed");
-      stop();
-    }
+        mixer.play(audioSource, 0.15);
+      },
+      onEnd: stop,
+      onError: () => {
+        setError("Synthesis failed");
+        stop();
+      },
+    });
+    player.push(text);
+    player.end();
   }, [text, mixer, player, stop]);
 
   return (
