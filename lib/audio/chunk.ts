@@ -1,12 +1,20 @@
 const TERMINATORS = new Set([".", "!", "?", "…"]);
 const CLOSERS = new Set(['"', "'", "\u201d", "\u2019", ")", "]"]);
 const SOFT_BREAKS = new Set([",", ";", ":"]);
-const HARD_MAX = 400;
 
 const ABBREVIATIONS = new Set([
   "mr", "mrs", "ms", "dr", "prof", "rev", "st", "jr", "sr",
   "vs", "etc", "eg", "ie", "approx", "inc", "ltd", "co", "no", "fig",
 ]);
+
+export interface ChunkLimits {
+  /** Preferred ceiling. A chunk runs to the last sentence end at or below it. */
+  softMax: number;
+  /** Absolute ceiling. A sentence longer than this is broken at punctuation. */
+  hardMax: number;
+  /** Release whatever remains, for when no more text is coming. */
+  flush: boolean;
+}
 
 export interface ChunkResult {
   chunk: string;
@@ -62,25 +70,31 @@ function split(buffer: string, at: number): ChunkResult {
  * Takes one synthesizable chunk off the front of `buffer`, or null when the
  * buffer holds nothing worth sending yet.
  *
- * A chunk runs to the first sentence end at or past `targetChars`, so a small
- * target yields a fast opening clip and a larger one keeps later clips long
- * enough to sound continuous. An overlong sentence is broken at punctuation
- * rather than stalling the pipeline. `flush` releases whatever is left, for
- * when no more text is coming.
+ * Both limits are ceilings, so chunk length stays predictable and synthesis
+ * time with it. Whole sentences are packed up to `softMax`; a single sentence
+ * that overshoots is still kept intact as long as it fits `hardMax`, and only
+ * one longer than that is broken at punctuation.
  */
 export function takeChunk(
   buffer: string,
-  targetChars: number,
-  flush: boolean,
+  limits: ChunkLimits,
 ): ChunkResult | null {
   if (buffer.trim() === "") return null;
 
-  for (const at of boundaries(buffer)) {
-    if (at >= targetChars) return split(buffer, at);
-  }
+  const { softMax, hardMax, flush } = limits;
+  const bounds = boundaries(buffer);
 
-  if (buffer.length >= HARD_MAX) {
-    return split(buffer, forcedBreak(buffer, HARD_MAX));
+  let at = -1;
+  for (const b of bounds) {
+    if (b <= softMax) at = b;
+  }
+  if (at === -1) {
+    at = bounds.find((b) => b <= hardMax) ?? -1;
+  }
+  if (at !== -1) return split(buffer, at);
+
+  if (buffer.length >= hardMax) {
+    return split(buffer, forcedBreak(buffer, hardMax));
   }
 
   return flush ? split(buffer, buffer.length) : null;

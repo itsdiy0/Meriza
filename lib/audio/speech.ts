@@ -6,13 +6,21 @@ import {
 
 const FFT_SIZE = 1024;
 const SMOOTHING = 0.6;
-const FIRST_CHUNK_CHARS = 40;
-const MAX_CHUNK_CHARS = 320;
-const CHUNK_GROWTH = 2;
+
+/**
+ * The engine splits anything longer than this internally and returns nothing
+ * until every piece has rendered, so a request above it costs a multiple of
+ * the latency for no gain. Matching it keeps one request to one generation.
+ */
+const ENGINE_CHUNK_CHARS = 120;
+const FIRST_CHUNK_CHARS = 70;
+
 const LEAD_IN_SECONDS = 0.05;
+const PREROLL_SECONDS = 1.5;
+const DEBUG = process.env.NODE_ENV !== "production";
 
 export interface SpeechHandlers {
-  /** Fires once per utterance, as the first clip is scheduled. */
+  /** Fires as the first clip becomes audible, not when it is scheduled. */
   onStart?(source: AnalyserSource): void;
   /** Fires when every queued clip has finished playing. */
   onEnd?(): void;
@@ -40,6 +48,13 @@ export interface SpeechPlayer {
  * start while later text is still being written or rendered. Every clip feeds
  * one analyser that lives for the whole utterance, so the orb sees a single
  * handover rather than one per sentence.
+ *
+ * Chunks are held near a constant size: the engine renders at roughly half of
+ * realtime whatever it is given, so each clip buys about twice the time the
+ * next one costs, and playback stays ahead without the pace drifting between
+ * utterances. The opening clip is smaller for a quicker start and scheduled a
+ * short way into the future, which covers the one handover with no backlog
+ * behind it.
  */
 export function createSpeechPlayer(): SpeechPlayer {
   let ctx: AudioContext | null = null;
@@ -57,6 +72,7 @@ export function createSpeechPlayer(): SpeechPlayer {
   let inputClosed = true;
 
   const clips = new Set<AudioBufferSourceNode>();
+  let startTimer: ReturnType<typeof setTimeout> | null = null;
   let scheduled = 0;
   let played = 0;
   let nextStart = 0;
@@ -68,6 +84,10 @@ export function createSpeechPlayer(): SpeechPlayer {
   };
 
   const teardown = () => {
+    if (startTimer !== null) {
+      clearTimeout(startTimer);
+      startTimer = null;
+    }
     for (const clip of clips) {
       clip.onended = null;
       try {
@@ -112,15 +132,11 @@ export function createSpeechPlayer(): SpeechPlayer {
 
   const drain = () => {
     for (;;) {
-      // Chunks grow geometrically: the opening one is small so speech starts
-      // quickly, and each one thereafter is long enough to cover the next
-      // request. Holding the ratio near double keeps every handover ahead of
-      // the engine, which renders roughly three times faster than realtime.
-      const target = Math.min(
-        FIRST_CHUNK_CHARS * CHUNK_GROWTH ** chunksTaken,
-        MAX_CHUNK_CHARS,
-      );
-      const next = takeChunk(pending, target, inputClosed);
+      const next = takeChunk(pending, {
+        softMax: chunksTaken === 0 ? FIRST_CHUNK_CHARS : ENGINE_CHUNK_CHARS,
+        hardMax: ENGINE_CHUNK_CHARS,
+        flush: inputClosed,
+      });
       if (next === null) break;
       pending = next.rest;
       chunksTaken++;
@@ -142,7 +158,7 @@ export function createSpeechPlayer(): SpeechPlayer {
     return { analyser, motion };
   };
 
-  const schedule = (buffer: AudioBuffer) => {
+  const schedule = (buffer: AudioBuffer, chars: number, synthMs: number) => {
     const audio = context();
     const { analyser, motion } = graph(audio);
 
@@ -150,9 +166,14 @@ export function createSpeechPlayer(): SpeechPlayer {
     clip.buffer = buffer;
     clip.connect(analyser);
 
-    // Clamp to the present: if synthesis fell behind playback the cursor is
-    // in the past, and a gap is better than a clip that never sounds.
-    const when = Math.max(nextStart, audio.currentTime + LEAD_IN_SECONDS);
+    // Audio still queued ahead of now. Negative means the pipeline fell
+    // behind and the listener hears a gap.
+    const lead = nextStart - audio.currentTime;
+    const first = scheduled === 0;
+    const earliest =
+      audio.currentTime + (first ? PREROLL_SECONDS : LEAD_IN_SECONDS);
+    const when = Math.max(nextStart, earliest);
+
     clip.start(when);
     nextStart = when + buffer.duration;
 
@@ -164,9 +185,23 @@ export function createSpeechPlayer(): SpeechPlayer {
       maybeFinish();
     };
 
+    if (DEBUG) {
+      console.info(
+        `[tts] #${scheduled} ${chars}c ` +
+          `synth ${Math.round(synthMs)}ms ` +
+          `audio ${buffer.duration.toFixed(1)}s ` +
+          `lead ${lead.toFixed(1)}s` +
+          (!first && lead < 0 ? `  GAP ${(-lead).toFixed(1)}s` : ""),
+      );
+    }
+
     if (!announced) {
       announced = true;
-      handlers.onStart?.(motion);
+      const delayMs = Math.max(0, (when - audio.currentTime) * 1000);
+      startTimer = setTimeout(() => {
+        startTimer = null;
+        handlers.onStart?.(motion);
+      }, delayMs);
     }
   };
 
@@ -192,13 +227,14 @@ export function createSpeechPlayer(): SpeechPlayer {
 
     synthesizing = true;
     const token = generation;
+    const began = performance.now();
 
     try {
       const bytes = await synthesize(chunk);
       if (token !== generation) return;
       const buffer = await context().decodeAudioData(bytes);
       if (token !== generation) return;
-      schedule(buffer);
+      schedule(buffer, chunk.length, performance.now() - began);
     } catch (error) {
       if (token !== generation) return;
       const failed = handlers.onError;
