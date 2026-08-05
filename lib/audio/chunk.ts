@@ -36,11 +36,21 @@ function isAbbreviation(text: string, at: number): boolean {
 /**
  * Offsets just past each sentence end. A terminator only closes a sentence
  * once whitespace follows, so a period still being typed does not split a
- * chunk early, and an abbreviation never closes one at all.
+ * chunk early, and an abbreviation never closes one at all. A line break also
+ * closes one, since headings and list items carry no terminator of their own.
  */
 function boundaries(text: string): number[] {
   const out: number[] = [];
   for (let i = 0; i < text.length; i++) {
+    if (text[i] === "\n") {
+      let j = i + 1;
+      while (j < text.length && /\s/.test(text[j])) j++;
+      if (j < text.length) {
+        out.push(i + 1);
+        i = j - 1;
+      }
+      continue;
+    }
     if (!TERMINATORS.has(text[i])) continue;
     if (text[i] === "." && isAbbreviation(text, i)) continue;
     let j = i + 1;
@@ -54,11 +64,7 @@ function boundaries(text: string): number[] {
   return out;
 }
 
-/**
- * Split point inside a sentence, between `min` and `limit`: the last
- * comma-class break in range, else the last space, else `limit` itself.
- * Both ends are bounded, so a lone early comma cannot strand a fragment.
- */
+/** Last comma-class break before `limit`, else the last space, else `limit`. */
 function forcedBreak(text: string, min: number, limit: number): number {
   const cap = Math.min(limit, text.length);
   const floor = Math.min(min, cap);
