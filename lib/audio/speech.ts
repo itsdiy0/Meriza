@@ -3,6 +3,7 @@ import {
   createAnalyserSource,
   type AnalyserSource,
 } from "@/lib/orb/motion/analyser";
+import { speakable } from "@/lib/audio/text";
 
 const FFT_SIZE = 1024;
 const SMOOTHING = 0.6;
@@ -144,7 +145,9 @@ export function createSpeechPlayer(): SpeechPlayer {
       if (next === null) break;
       pending = next.rest;
       chunksTaken++;
-      if (next.chunk !== "") queue.push(next.chunk);
+      // A chunk that was nothing but markup leaves nothing to say.
+      const spoken = speakable(next.chunk);
+      if (spoken !== "") queue.push(spoken);
     }
   };
 
