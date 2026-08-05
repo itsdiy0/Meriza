@@ -54,13 +54,18 @@ function boundaries(text: string): number[] {
   return out;
 }
 
-/** Last comma-class break before `limit`, else the last space, else `limit`. */
-function forcedBreak(text: string, limit: number): number {
+/**
+ * Split point inside a sentence, between `min` and `limit`: the last
+ * comma-class break in range, else the last space, else `limit` itself.
+ * Both ends are bounded, so a lone early comma cannot strand a fragment.
+ */
+function forcedBreak(text: string, min: number, limit: number): number {
   const cap = Math.min(limit, text.length);
-  for (let i = cap - 1; i > 0; i--) {
+  const floor = Math.min(min, cap);
+  for (let i = cap - 1; i >= floor; i--) {
     if (SOFT_BREAKS.has(text[i])) return i + 1;
   }
-  for (let i = cap - 1; i > 0; i--) {
+  for (let i = cap - 1; i >= floor; i--) {
     if (/\s/.test(text[i])) return i;
   }
   return cap;
@@ -102,11 +107,12 @@ export function takeChunk(
 
   if (end > hardMax) {
     const pieces = Math.ceil(end / hardMax);
-    return split(buffer, forcedBreak(buffer, Math.ceil(end / pieces)));
+    const target = Math.ceil(end / pieces);
+    return split(buffer, forcedBreak(buffer, minChars, target));
   }
 
   if (buffer.length >= hardMax) {
-    return split(buffer, forcedBreak(buffer, hardMax));
+    return split(buffer, forcedBreak(buffer, minChars, hardMax));
   }
 
   return flush ? split(buffer, buffer.length) : null;
