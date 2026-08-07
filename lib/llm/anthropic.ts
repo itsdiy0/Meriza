@@ -1,10 +1,8 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { SYSTEM_PROMPT } from "@/lib/llm/prompt";
 import type { LlmProvider, ProviderMessage } from "@/lib/llm/provider";
 
 const DEFAULT_MODEL = "claude-sonnet-4-6";
-const DEFAULT_SYSTEM =
-  "You are Meriza, a calm and concise conversational assistant. " +
-  "Keep replies warm, direct, and brief.";
 
 export function createAnthropicProvider(): LlmProvider {
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -14,7 +12,7 @@ export function createAnthropicProvider(): LlmProvider {
 
   const client = new Anthropic({ apiKey });
   const model = process.env.MERIZA_MODEL || DEFAULT_MODEL;
-  const system = process.env.MERIZA_SYSTEM_PROMPT || DEFAULT_SYSTEM;
+  const system = process.env.MERIZA_SYSTEM_PROMPT || SYSTEM_PROMPT;
 
   return {
     async *stream(messages: ProviderMessage[]): AsyncIterable<string> {
