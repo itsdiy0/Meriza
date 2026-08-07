@@ -4,17 +4,19 @@ import { useState, type FormEvent } from "react";
 
 interface ComposerProps {
   onSend: (text: string) => void;
-  disabled: boolean;
+  onStop: () => void;
+  /** True while Meriza is generating or speaking. */
+  active: boolean;
 }
 
-export default function Composer({ onSend, disabled }: ComposerProps) {
+export default function Composer({ onSend, onStop, active }: ComposerProps) {
   const [value, setValue] = useState("");
+  const empty = value.trim() === "";
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    const text = value.trim();
-    if (!text || disabled) return;
-    onSend(text);
+    if (empty) return;
+    onSend(value.trim());
     setValue("");
   };
 
@@ -55,26 +57,44 @@ export default function Composer({ onSend, disabled }: ComposerProps) {
         className="min-w-0 flex-1 bg-transparent px-2 text-[15px] text-[var(--text)] placeholder:text-[var(--muted)] focus:outline-none"
       />
 
-      <button
-        type="submit"
-        disabled={disabled || value.trim() === ""}
-        aria-label="Send message"
-        className="grid size-9 shrink-0 place-items-center rounded-full bg-[var(--text)] text-[var(--ink)] transition-opacity disabled:opacity-30 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--glow)]"
-      >
-        <svg
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.8"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          className="size-4"
-          aria-hidden
+      {active ? (
+        <button
+          type="button"
+          onClick={onStop}
+          aria-label="Stop"
+          className="grid size-9 shrink-0 place-items-center rounded-full bg-[var(--text)] text-[var(--ink)] transition-opacity focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--glow)]"
         >
-          <path d="M5 12h14" />
-          <path d="m13 6 6 6-6 6" />
-        </svg>
-      </button>
+          <svg
+            viewBox="0 0 24 24"
+            fill="currentColor"
+            className="size-3.5"
+            aria-hidden
+          >
+            <rect x="6" y="6" width="12" height="12" rx="2.5" />
+          </svg>
+        </button>
+      ) : (
+        <button
+          type="submit"
+          disabled={empty}
+          aria-label="Send message"
+          className="grid size-9 shrink-0 place-items-center rounded-full bg-[var(--text)] text-[var(--ink)] transition-opacity disabled:opacity-30 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--glow)]"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="size-4"
+            aria-hidden
+          >
+            <path d="M5 12h14" />
+            <path d="m13 6 6 6-6 6" />
+          </svg>
+        </button>
+      )}
     </form>
   );
 }

@@ -11,11 +11,15 @@ import type { ChatStreamChunk, Message, OrbState } from "@/lib/types";
 
 const newId = () => crypto.randomUUID();
 
+const isAbort = (error: unknown) =>
+  error instanceof DOMException && error.name === "AbortError";
+
 export default function Home() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [orbState, setOrbState] = useState<OrbState>("idle");
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [speaking, setSpeaking] = useState(false);
 
   const mixerRef = useRef<MotionMixer | null>(null);
   if (mixerRef.current === null) mixerRef.current = createMotionMixer();
@@ -25,12 +29,23 @@ export default function Home() {
   if (playerRef.current === null) playerRef.current = createSpeechPlayer();
   const player = playerRef.current;
 
+  const abortRef = useRef<AbortController | null>(null);
+
   const onFrame = useCallback((t: number) => mixer.frame(t), [mixer]);
 
-  const settle = useCallback(() => {
+  /**
+   * Ends the current turn wherever it has reached: generation, synthesis, or
+   * playback. Whatever text arrived stays in the transcript, since it is what
+   * actually happened.
+   */
+  const stop = useCallback(() => {
+    abortRef.current?.abort();
+    abortRef.current = null;
     player.stop();
     mixer.clear();
     setOrbState("idle");
+    setGenerating(false);
+    setSpeaking(false);
   }, [mixer, player]);
 
   const appendToAssistant = useCallback((id: string, text: string) => {
@@ -41,10 +56,9 @@ export default function Home() {
 
   const send = useCallback(
     async (text: string) => {
-      if (busy) return;
-
-      // A new turn supersedes the last reply, which may still be speaking.
-      settle();
+      // A new turn supersedes the last one, which may still be generating or
+      // speaking. Interrupting is expected, not an error.
+      stop();
 
       const userMessage: Message = { id: newId(), role: "user", content: text };
       const assistantId = newId();
@@ -56,7 +70,8 @@ export default function Home() {
         { id: assistantId, role: "assistant", content: "" },
       ]);
       setOrbState("thinking");
-      setBusy(true);
+      setGenerating(true);
+      setSpeaking(true);
 
       // Inside the send gesture, which is the only place iOS Safari will
       // honour a resume.
@@ -69,12 +84,16 @@ export default function Home() {
         onEnd: () => {
           mixer.clear();
           setOrbState("idle");
+          setSpeaking(false);
         },
         onError: () => {
           setError("Voice playback failed");
-          settle();
+          stop();
         },
       });
+
+      const controller = new AbortController();
+      abortRef.current = controller;
 
       try {
         const res = await fetch("/api/chat", {
@@ -86,8 +105,11 @@ export default function Home() {
               content: m.content,
             })),
           }),
+          signal: controller.signal,
         });
-        if (!res.ok || !res.body) throw new Error(`Request failed: ${res.status}`);
+        if (!res.ok || !res.body) {
+          throw new Error(`Request failed: ${res.status}`);
+        }
 
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
@@ -122,15 +144,16 @@ export default function Home() {
           }
         }
 
+        abortRef.current = null;
+        setGenerating(false);
         player.end();
-      } catch {
+      } catch (err) {
+        if (isAbort(err)) return;
         setError("Lost the connection, try again");
-        settle();
-      } finally {
-        setBusy(false);
+        stop();
       }
     },
-    [busy, messages, appendToAssistant, mixer, player, settle],
+    [messages, appendToAssistant, mixer, player, stop],
   );
 
   useEffect(() => {
@@ -148,7 +171,11 @@ export default function Home() {
           <Transcript messages={messages} error={error} />
         </div>
         <div className="px-4 pb-[calc(env(safe-area-inset-bottom)+16px)] pt-2">
-          <Composer onSend={send} disabled={busy} />
+          <Composer
+            onSend={send}
+            onStop={stop}
+            active={generating || speaking}
+          />
         </div>
       </div>
     </main>
