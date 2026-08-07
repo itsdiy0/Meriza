@@ -51,11 +51,25 @@ function isAbbreviation(text: string, at: number): boolean {
 }
 
 /**
+ * True when the period closes an ordered list marker: digits at the start of a
+ * line. Bounded to the line start so a year ending a sentence still counts as
+ * a sentence end.
+ */
+function isListMarker(text: string, at: number): boolean {
+  let k = at - 1;
+  while (k >= 0 && /\d/.test(text[k])) k--;
+  if (k === at - 1) return false;
+  while (k >= 0 && (text[k] === " " || text[k] === "\t")) k--;
+  return k < 0 || text[k] === "\n";
+}
+
+/**
  * Offsets just past each break, tagged with its kind. A terminator only closes
  * a sentence once whitespace follows, so a period still being typed does not
- * split a chunk early, and an abbreviation never closes one at all. A line
- * break also closes one, since headings and list items carry no terminator of
- * their own, and a blank line between them reads as a larger division.
+ * split a chunk early, and neither an abbreviation nor a list number ever
+ * closes one. A line break also closes one, since headings and list items
+ * carry no terminator of their own, and a blank line between them reads as a
+ * larger division.
  */
 function boundaries(text: string): Boundary[] {
   const out: Boundary[] = [];
@@ -77,6 +91,7 @@ function boundaries(text: string): Boundary[] {
 
     if (!TERMINATORS.has(text[i])) continue;
     if (text[i] === "." && isAbbreviation(text, i)) continue;
+    if (text[i] === "." && isListMarker(text, i)) continue;
 
     let j = i + 1;
     while (j < text.length && TERMINATORS.has(text[j])) j++;
@@ -140,9 +155,7 @@ export function takeChunk(
 
   const structural = bounds.find(
     (b) =>
-      b.kind !== "sentence" &&
-      b.at >= structuralMinChars &&
-      b.at <= hardMax,
+      b.kind !== "sentence" && b.at >= structuralMinChars && b.at <= hardMax,
   );
   if (structural !== undefined) {
     return split(buffer, structural.at, structural.kind);
