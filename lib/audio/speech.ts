@@ -1,9 +1,9 @@
-import { takeChunk } from "@/lib/audio/chunk";
+import { takeChunk, type ChunkBoundary } from "@/lib/audio/chunk";
+import { speakable } from "@/lib/audio/text";
 import {
   createAnalyserSource,
   type AnalyserSource,
 } from "@/lib/orb/motion/analyser";
-import { speakable } from "@/lib/audio/text";
 
 const FFT_SIZE = 1024;
 const SMOOTHING = 0.6;
@@ -15,12 +15,30 @@ const SMOOTHING = 0.6;
  */
 const ENGINE_CHUNK_CHARS = 120;
 const MIN_CHUNK_CHARS = 60;
+const STRUCTURAL_MIN_CHARS = 25;
 const FIRST_CHUNK_CHARS = 70;
 const FIRST_MIN_CHUNK_CHARS = 30;
+
+/**
+ * Silence left after a clip, by the kind of break it ended on. A forced split
+ * lands mid-sentence, where any pause at all reads as a stutter.
+ */
+const BREATH_SECONDS: Record<ChunkBoundary, number> = {
+  sentence: 0.1,
+  line: 0.35,
+  paragraph: 0.6,
+  forced: 0,
+  flush: 0,
+};
 
 const LEAD_IN_SECONDS = 0.05;
 const PREROLL_SECONDS = 1.5;
 const DEBUG = process.env.NODE_ENV !== "production";
+
+interface QueuedChunk {
+  text: string;
+  boundary: ChunkBoundary;
+}
 
 export interface SpeechHandlers {
   /** Fires as the first clip becomes audible, not when it is scheduled. */
@@ -69,7 +87,7 @@ export function createSpeechPlayer(): SpeechPlayer {
   let generation = 0;
 
   let pending = "";
-  const queue: string[] = [];
+  const queue: QueuedChunk[] = [];
   let chunksTaken = 0;
   let synthesizing = false;
   let inputClosed = true;
@@ -138,6 +156,7 @@ export function createSpeechPlayer(): SpeechPlayer {
       const first = chunksTaken === 0;
       const next = takeChunk(pending, {
         minChars: first ? FIRST_MIN_CHUNK_CHARS : MIN_CHUNK_CHARS,
+        structuralMinChars: STRUCTURAL_MIN_CHARS,
         softMax: first ? FIRST_CHUNK_CHARS : ENGINE_CHUNK_CHARS,
         hardMax: ENGINE_CHUNK_CHARS,
         flush: inputClosed,
@@ -145,9 +164,9 @@ export function createSpeechPlayer(): SpeechPlayer {
       if (next === null) break;
       pending = next.rest;
       chunksTaken++;
-      // A chunk that was nothing but markup leaves nothing to say.
-      const spoken = speakable(next.chunk);
-      if (spoken !== "") queue.push(spoken);
+      // A chunk that was nothing but markup or emoji leaves nothing to say.
+      const text = speakable(next.chunk);
+      if (text !== "") queue.push({ text, boundary: next.boundary });
     }
   };
 
@@ -165,7 +184,11 @@ export function createSpeechPlayer(): SpeechPlayer {
     return { analyser, motion };
   };
 
-  const schedule = (buffer: AudioBuffer, chars: number, synthMs: number) => {
+  const schedule = (
+    buffer: AudioBuffer,
+    chunk: QueuedChunk,
+    synthMs: number,
+  ) => {
     const audio = context();
     const { analyser, motion } = graph(audio);
 
@@ -182,7 +205,7 @@ export function createSpeechPlayer(): SpeechPlayer {
     const when = Math.max(nextStart, earliest);
 
     clip.start(when);
-    nextStart = when + buffer.duration;
+    nextStart = when + buffer.duration + BREATH_SECONDS[chunk.boundary];
 
     clips.add(clip);
     scheduled++;
@@ -194,7 +217,8 @@ export function createSpeechPlayer(): SpeechPlayer {
 
     if (DEBUG) {
       console.info(
-        `[tts] #${scheduled} ${chars}c ` +
+        `[tts] #${scheduled} ${chunk.text.length}c ` +
+          `${chunk.boundary} ` +
           `synth ${Math.round(synthMs)}ms ` +
           `audio ${buffer.duration.toFixed(1)}s ` +
           `lead ${lead.toFixed(1)}s` +
@@ -237,11 +261,11 @@ export function createSpeechPlayer(): SpeechPlayer {
     const began = performance.now();
 
     try {
-      const bytes = await synthesize(chunk);
+      const bytes = await synthesize(chunk.text);
       if (token !== generation) return;
       const buffer = await context().decodeAudioData(bytes);
       if (token !== generation) return;
-      schedule(buffer, chunk.length, performance.now() - began);
+      schedule(buffer, chunk, performance.now() - began);
     } catch (error) {
       if (token !== generation) return;
       const failed = handlers.onError;

@@ -7,10 +7,26 @@ const ABBREVIATIONS = new Set([
   "vs", "etc", "eg", "ie", "approx", "inc", "ltd", "co", "no", "fig",
 ]);
 
+/** What kind of break a chunk ends on. Drives the pause the player leaves. */
+export type ChunkBoundary =
+  | "sentence"
+  | "line"
+  | "paragraph"
+  | "forced"
+  | "flush";
+
+interface Boundary {
+  at: number;
+  kind: "sentence" | "line" | "paragraph";
+}
+
 export interface ChunkLimits {
-  /** Floor. Each request carries fixed overhead, so tiny chunks cost more
-   *  time than the audio they return. */
+  /** Floor for packing sentences. Each request carries fixed overhead, so
+   *  tiny chunks cost more time than the audio they return. */
   minChars: number;
+  /** Lower floor for structural breaks, since a list item is worth its own
+   *  clip even when it is short. */
+  structuralMinChars: number;
   /** Preferred ceiling. Whole sentences are packed up to it. */
   softMax: number;
   /** Absolute ceiling. A longer sentence is divided at punctuation. */
@@ -22,6 +38,7 @@ export interface ChunkLimits {
 export interface ChunkResult {
   chunk: string;
   rest: string;
+  boundary: ChunkBoundary;
 }
 
 /** True when the period closes a title, an initial, or a common abbreviation. */
@@ -34,33 +51,42 @@ function isAbbreviation(text: string, at: number): boolean {
 }
 
 /**
- * Offsets just past each sentence end. A terminator only closes a sentence
- * once whitespace follows, so a period still being typed does not split a
- * chunk early, and an abbreviation never closes one at all. A line break also
- * closes one, since headings and list items carry no terminator of their own.
+ * Offsets just past each break, tagged with its kind. A terminator only closes
+ * a sentence once whitespace follows, so a period still being typed does not
+ * split a chunk early, and an abbreviation never closes one at all. A line
+ * break also closes one, since headings and list items carry no terminator of
+ * their own, and a blank line between them reads as a larger division.
  */
-function boundaries(text: string): number[] {
-  const out: number[] = [];
+function boundaries(text: string): Boundary[] {
+  const out: Boundary[] = [];
+
   for (let i = 0; i < text.length; i++) {
     if (text[i] === "\n") {
       let j = i + 1;
-      while (j < text.length && /\s/.test(text[j])) j++;
+      let newlines = 1;
+      while (j < text.length && /\s/.test(text[j])) {
+        if (text[j] === "\n") newlines++;
+        j++;
+      }
       if (j < text.length) {
-        out.push(i + 1);
+        out.push({ at: i + 1, kind: newlines > 1 ? "paragraph" : "line" });
         i = j - 1;
       }
       continue;
     }
+
     if (!TERMINATORS.has(text[i])) continue;
     if (text[i] === "." && isAbbreviation(text, i)) continue;
+
     let j = i + 1;
     while (j < text.length && TERMINATORS.has(text[j])) j++;
     while (j < text.length && CLOSERS.has(text[j])) j++;
     if (j < text.length && /\s/.test(text[j])) {
-      out.push(j);
+      out.push({ at: j, kind: "sentence" });
       i = j;
     }
   }
+
   return out;
 }
 
@@ -77,19 +103,31 @@ function forcedBreak(text: string, min: number, limit: number): number {
   return cap;
 }
 
-function split(buffer: string, at: number): ChunkResult {
-  return { chunk: buffer.slice(0, at).trim(), rest: buffer.slice(at) };
+function split(
+  buffer: string,
+  at: number,
+  boundary: ChunkBoundary,
+): ChunkResult {
+  return {
+    chunk: buffer.slice(0, at).trim(),
+    rest: buffer.slice(at),
+    boundary,
+  };
 }
 
 /**
  * Takes one synthesizable chunk off the front of `buffer`, or null when the
  * buffer holds nothing worth sending yet.
  *
- * Chunk length is bounded on both sides so synthesis time stays predictable:
- * whole sentences are packed up to `softMax`, and anything that would fall
- * below `minChars` is held back for the text behind it. A sentence too long
- * for `hardMax` is divided into even pieces rather than shaved from the
- * front, which would leave a tail too short to be worth its own request.
+ * A structural break ends the chunk on sight, ahead of any packing: silence
+ * between list items or paragraphs can only be scheduled between clips, so
+ * two items sharing one clip lose the division no matter how they are
+ * punctuated. Sentences inside a block still pack up to `softMax`, which is
+ * what keeps continuous prose from being chopped into one clip per sentence.
+ *
+ * A sentence too long for `hardMax` is divided into even pieces rather than
+ * shaved from the front, which would leave a tail too short to be worth its
+ * own request.
  */
 export function takeChunk(
   buffer: string,
@@ -97,29 +135,40 @@ export function takeChunk(
 ): ChunkResult | null {
   if (buffer.trim() === "") return null;
 
-  const { minChars, softMax, hardMax, flush } = limits;
+  const { minChars, structuralMinChars, softMax, hardMax, flush } = limits;
   const bounds = boundaries(buffer);
 
-  let at = -1;
-  for (const b of bounds) {
-    if (b >= minChars && b <= softMax) at = b;
+  const structural = bounds.find(
+    (b) =>
+      b.kind !== "sentence" &&
+      b.at >= structuralMinChars &&
+      b.at <= hardMax,
+  );
+  if (structural !== undefined) {
+    return split(buffer, structural.at, structural.kind);
   }
-  if (at === -1) {
-    at = bounds.find((b) => b >= minChars && b <= hardMax) ?? -1;
-  }
-  if (at !== -1) return split(buffer, at);
 
-  const end = bounds.find((b) => b >= minChars) ?? (flush ? buffer.length : -1);
+  let chosen: Boundary | null = null;
+  for (const b of bounds) {
+    if (b.at >= minChars && b.at <= softMax) chosen = b;
+  }
+  if (chosen === null) {
+    chosen = bounds.find((b) => b.at >= minChars && b.at <= hardMax) ?? null;
+  }
+  if (chosen !== null) return split(buffer, chosen.at, chosen.kind);
+
+  const end =
+    bounds.find((b) => b.at >= minChars)?.at ?? (flush ? buffer.length : -1);
 
   if (end > hardMax) {
     const pieces = Math.ceil(end / hardMax);
     const target = Math.ceil(end / pieces);
-    return split(buffer, forcedBreak(buffer, minChars, target));
+    return split(buffer, forcedBreak(buffer, minChars, target), "forced");
   }
 
   if (buffer.length >= hardMax) {
-    return split(buffer, forcedBreak(buffer, minChars, hardMax));
+    return split(buffer, forcedBreak(buffer, minChars, hardMax), "forced");
   }
 
-  return flush ? split(buffer, buffer.length) : null;
+  return flush ? split(buffer, buffer.length, "flush") : null;
 }
