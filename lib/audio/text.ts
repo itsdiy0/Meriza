@@ -1,14 +1,41 @@
 const RULE = /^\s*([-*_])(\s*\1){2,}\s*$/;
 const FENCE = /^\s*(```|~~~)/;
+const TABLE_ROW = /^\s*\|.*\|\s*$/;
+const TABLE_DIVIDER = /^\s*\|[\s|:-]+\|\s*$/;
 const ORDERED = /^\s*(\d+)[.)]\s+/;
 const STRUCTURE = /^(\s{0,3}#{1,6}\s+|\s{0,3}>\s?|\s*[-*+]\s+)/;
 const TERMINATED = /[.!?…:;,]$/;
+const SPEECHLESS = /^[^\p{L}\p{N}]+$/u;
 
 const KEYCAP = /[0-9#*]\uFE0F?\u20E3/g;
 const FLAG = /[\u{1F1E6}-\u{1F1FF}]{2}/gu;
 const PICTOGRAPH =
   /\p{Extended_Pictographic}(\p{Emoji_Modifier}|\uFE0F)?(\u200D\p{Extended_Pictographic}(\p{Emoji_Modifier}|\uFE0F)?)*/gu;
 const JOINERS = /[\uFE0E\uFE0F\u200D]/g;
+
+/** Ends a spoken line with a period unless it already closes on punctuation. */
+function terminate(line: string): string {
+  return TERMINATED.test(line) ? line : `${line}.`;
+}
+
+/**
+ * Reads a table row as its cells in order, separated by commas. Cells holding
+ * no letters or digits are dropped, which removes the `#` a rank column is
+ * usually headed with. The divider row is pure punctuation and is skipped
+ * entirely, since it carries no meaning aloud.
+ */
+function tableRow(raw: string): string {
+  if (TABLE_DIVIDER.test(raw)) return "";
+
+  const cells = raw
+    .trim()
+    .replace(/^\||\|$/g, "")
+    .split("|")
+    .map((cell) => cell.trim())
+    .filter((cell) => cell !== "" && !SPEECHLESS.test(cell));
+
+  return cells.length === 0 ? "" : terminate(cells.join(", "));
+}
 
 /**
  * Strips markdown and emoji the engine would otherwise pronounce. Applied per
@@ -19,8 +46,9 @@ const JOINERS = /[\uFE0E\uFE0F\u200D]/g;
  * marker is kept: in a ranked list the number carries the meaning, and without
  * it a listener cannot tell third place from eighth.
  *
- * Headings and list items are terminated with a period when they lack one, so
- * the engine renders the falling intonation that carries the structure.
+ * Headings, list items, and table rows are terminated with a period when they
+ * lack one, so the engine renders the falling intonation that carries the
+ * structure.
  *
  * Line structure then collapses to spaces. Emoji sequences are removed longest
  * first so a keycap or flag is not left as a stray digit or half a pair.
@@ -28,6 +56,7 @@ const JOINERS = /[\uFE0E\uFE0F\u200D]/g;
 export function speakable(text: string): string {
   const lines = text.split("\n").map((raw) => {
     if (RULE.test(raw) || FENCE.test(raw)) return "";
+    if (TABLE_ROW.test(raw)) return tableRow(raw);
 
     const ordered = raw.match(ORDERED);
     const structural = ordered !== null || STRUCTURE.test(raw);
@@ -35,7 +64,7 @@ export function speakable(text: string): string {
     if (body === "") return "";
 
     const spoken = ordered === null ? body : `${ordered[1]}. ${body}`;
-    return structural && !TERMINATED.test(spoken) ? `${spoken}.` : spoken;
+    return structural ? terminate(spoken) : spoken;
   });
 
   return lines
@@ -47,6 +76,7 @@ export function speakable(text: string): string {
     .replace(/\*([^*\n]+)\*/g, "$1")
     .replace(/(^|\W)_([^_\n]+)_(?=\W|$)/g, "$1$2")
     .replace(/~~(.+?)~~/g, "$1")
+    .replace(/~(?=[\d$£€¥])/g, "about ")
     .replace(KEYCAP, " ")
     .replace(FLAG, " ")
     .replace(PICTOGRAPH, " ")
