@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import RevealedText from "@/components/RevealedText";
 import type { Message } from "@/lib/types";
 
 interface TranscriptProps {
@@ -39,7 +40,11 @@ export default function Transcript({ messages, error }: TranscriptProps) {
               {m.role === "user" ? "you" : "meriza"}
             </div>
             <p className="mt-1 max-w-md whitespace-pre-wrap text-[15px] leading-relaxed text-[var(--text)]">
-              {m.content}
+              {m.role === "assistant" ? (
+                <RevealedText text={m.content} />
+              ) : (
+                m.content
+              )}
               {m.role === "assistant" && m.content === "" && (
                 <span className="inline-block h-3 w-2 animate-pulse bg-[var(--text)] align-middle" />
               )}
