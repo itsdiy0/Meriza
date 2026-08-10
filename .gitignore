@@ -16,5 +16,4 @@ yarn-error.log*
 .vercel
 *.tsbuildinfo
 
-/docs
 /Chatterbox-TTS-Server
