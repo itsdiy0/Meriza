@@ -7,6 +7,7 @@ import Transcript from "@/components/Transcript";
 import { createSpeechPlayer, type SpeechPlayer } from "@/lib/audio/speech";
 import { createMotionMixer, type MotionMixer } from "@/lib/orb/motion/mixer";
 import { createWaitingSource } from "@/lib/orb/motion/waiting";
+import { createRevealer, type Revealer } from "@/lib/transcript/reveal";
 import type { ChatStreamChunk, Message, OrbState } from "@/lib/types";
 
 const newId = () => crypto.randomUUID();
@@ -30,29 +31,50 @@ export default function Home() {
   const player = playerRef.current;
 
   const abortRef = useRef<AbortController | null>(null);
+  const replyIdRef = useRef<string | null>(null);
+
+  const writeReply = useCallback((content: string) => {
+    const id = replyIdRef.current;
+    if (id === null) return;
+    setMessages((prev) =>
+      prev.map((m) => (m.id === id ? { ...m, content } : m)),
+    );
+  }, []);
+
+  const revealerRef = useRef<Revealer | null>(null);
+  if (revealerRef.current === null) {
+    revealerRef.current = createRevealer(writeReply);
+  }
+  const revealer = revealerRef.current;
 
   const onFrame = useCallback((t: number) => mixer.frame(t), [mixer]);
 
   /**
-   * Ends the current turn wherever it has reached: generation, synthesis, or
-   * playback. Whatever text arrived stays in the transcript, since it is what
-   * actually happened.
+   * Ends the current turn wherever it has reached, keeping whatever was
+   * actually spoken. The transcript records what was said rather than what was
+   * written, so an interrupted reply stops mid-sentence and text the orb never
+   * reached is discarded with it. A turn cut off before it spoke at all leaves
+   * no reply, so its empty message is removed rather than left labelled and
+   * blank.
    */
   const stop = useCallback(() => {
     abortRef.current?.abort();
     abortRef.current = null;
     player.stop();
+    revealer.halt();
+
+    const id = replyIdRef.current;
+    if (id !== null) {
+      setMessages((prev) =>
+        prev.filter((m) => m.id !== id || m.content !== ""),
+      );
+    }
+
     mixer.clear();
     setOrbState("idle");
     setGenerating(false);
     setSpeaking(false);
-  }, [mixer, player]);
-
-  const appendToAssistant = useCallback((id: string, text: string) => {
-    setMessages((prev) =>
-      prev.map((m) => (m.id === id ? { ...m, content: m.content + text } : m)),
-    );
-  }, []);
+  }, [mixer, player, revealer]);
 
   const send = useCallback(
     async (text: string) => {
@@ -61,14 +83,14 @@ export default function Home() {
       stop();
 
       const userMessage: Message = { id: newId(), role: "user", content: text };
-      const assistantId = newId();
+      const replyId = newId();
       const history = [...messages, userMessage];
 
+      replyIdRef.current = replyId;
+      revealer.reset();
+
       setError(null);
-      setMessages([
-        ...history,
-        { id: assistantId, role: "assistant", content: "" },
-      ]);
+      setMessages([...history, { id: replyId, role: "assistant", content: "" }]);
       setOrbState("thinking");
       setGenerating(true);
       setSpeaking(true);
@@ -81,7 +103,9 @@ export default function Home() {
           setOrbState("responding");
           mixer.play(audioSource, 0.15);
         },
+        onChunk: (spoken, seconds) => revealer.push(spoken, seconds),
         onEnd: () => {
+          revealer.flush();
           mixer.clear();
           setOrbState("idle");
           setSpeaking(false);
@@ -135,8 +159,8 @@ export default function Home() {
                 setOrbState("waiting");
                 mixer.play(createWaitingSource(), 0.6);
               }
-              appendToAssistant(assistantId, chunk.text);
-              // The transcript keeps its markup; only speech loses it.
+              // Not shown here: the transcript is paced by the player, so a
+              // word appears as the orb reaches it.
               player.push(chunk.text);
             } else {
               setError(chunk.message);
@@ -153,14 +177,15 @@ export default function Home() {
         stop();
       }
     },
-    [messages, appendToAssistant, mixer, player, stop],
+    [messages, mixer, player, revealer, stop],
   );
 
   useEffect(() => {
     return () => {
       player.dispose();
+      revealer.halt();
     };
-  }, [player]);
+  }, [player, revealer]);
 
   return (
     <main className="relative h-[100dvh] w-full overflow-hidden">
