@@ -36,10 +36,14 @@ export interface ChunkLimits {
 }
 
 export interface ChunkResult {
-  chunk: string;
-  rest: string;
-  boundary: ChunkBoundary;
-}
+    /** Trimmed text for synthesis. */
+    chunk: string;
+    /** The slice exactly as it appeared, untrimmed. Concatenating every `raw`
+     *  in order reproduces the input, which is what the transcript reveals. */
+    raw: string;
+    rest: string;
+    boundary: ChunkBoundary;
+  }
 
 /** True when the period closes a title, an initial, or a common abbreviation. */
 function isAbbreviation(text: string, at: number): boolean {
@@ -119,16 +123,13 @@ function forcedBreak(text: string, min: number, limit: number): number {
 }
 
 function split(
-  buffer: string,
-  at: number,
-  boundary: ChunkBoundary,
-): ChunkResult {
-  return {
-    chunk: buffer.slice(0, at).trim(),
-    rest: buffer.slice(at),
-    boundary,
-  };
-}
+    buffer: string,
+    at: number,
+    boundary: ChunkBoundary,
+  ): ChunkResult {
+    const raw = buffer.slice(0, at);
+    return { chunk: raw.trim(), raw, rest: buffer.slice(at), boundary };
+  }
 
 /**
  * Takes one synthesizable chunk off the front of `buffer`, or null when the

@@ -15,7 +15,7 @@ const SMOOTHING = 0.6;
  */
 const ENGINE_CHUNK_CHARS = 120;
 const MIN_CHUNK_CHARS = 60;
-const STRUCTURAL_MIN_CHARS = 25;
+const STRUCTURAL_MIN_CHARS = 12;
 const FIRST_CHUNK_CHARS = 70;
 const FIRST_MIN_CHUNK_CHARS = 30;
 
@@ -36,13 +36,26 @@ const PREROLL_SECONDS = 1.5;
 const DEBUG = process.env.NODE_ENV !== "production";
 
 interface QueuedChunk {
+  /** Stripped text sent to the engine. */
   text: string;
+  /** The same span as it was written, for display. */
+  raw: string;
   boundary: ChunkBoundary;
 }
 
 export interface SpeechHandlers {
   /** Fires as the first clip becomes audible, not when it is scheduled. */
   onStart?(source: AnalyserSource): void;
+  /**
+   * Fires as each clip becomes audible, carrying the text that clip speaks as
+   * it was originally written and how long it will take to say. Concatenating
+   * every payload in order reproduces the text that was pushed.
+   *
+   * A span that produced no speech, a rule or a table divider, rides along
+   * with the next spoken chunk, and any trailing remainder arrives in a final
+   * call with zero duration just before `onEnd`.
+   */
+  onChunk?(text: string, durationSeconds: number): void;
   /** Fires when every queued clip has finished playing. */
   onEnd?(): void;
   onError?(error: unknown): void;
@@ -76,6 +89,9 @@ export interface SpeechPlayer {
  * utterances. The opening clip is smaller for a quicker start and scheduled a
  * short way into the future, which covers the one handover with no backlog
  * behind it.
+ *
+ * Because a clip's audible moment is known the instant it is scheduled, the
+ * player is also the clock anything following the speech should run on.
  */
 export function createSpeechPlayer(): SpeechPlayer {
   let ctx: AudioContext | null = null;
@@ -87,17 +103,17 @@ export function createSpeechPlayer(): SpeechPlayer {
   let generation = 0;
 
   let pending = "";
+  let carriedRaw = "";
   const queue: QueuedChunk[] = [];
   let chunksTaken = 0;
   let synthesizing = false;
   let inputClosed = true;
 
   const clips = new Set<AudioBufferSourceNode>();
-  let startTimer: ReturnType<typeof setTimeout> | null = null;
+  const timers = new Set<ReturnType<typeof setTimeout>>();
   let scheduled = 0;
   let played = 0;
   let nextStart = 0;
-  let announced = false;
 
   const context = (): AudioContext => {
     if (ctx === null) ctx = new AudioContext();
@@ -105,10 +121,8 @@ export function createSpeechPlayer(): SpeechPlayer {
   };
 
   const teardown = () => {
-    if (startTimer !== null) {
-      clearTimeout(startTimer);
-      startTimer = null;
-    }
+    for (const timer of timers) clearTimeout(timer);
+    timers.clear();
     for (const clip of clips) {
       clip.onended = null;
       try {
@@ -124,6 +138,7 @@ export function createSpeechPlayer(): SpeechPlayer {
     source?.end();
     source = null;
     pending = "";
+    carriedRaw = "";
     queue.length = 0;
     chunksTaken = 0;
     synthesizing = false;
@@ -131,7 +146,6 @@ export function createSpeechPlayer(): SpeechPlayer {
     scheduled = 0;
     played = 0;
     nextStart = 0;
-    announced = false;
   };
 
   const stop = () => {
@@ -146,8 +160,15 @@ export function createSpeechPlayer(): SpeechPlayer {
     if (!inputClosed || synthesizing) return;
     if (pending.trim() !== "" || queue.length > 0) return;
     if (played < scheduled) return;
+
+    // Captured before teardown clears them.
     const finished = handlers.onEnd;
+    const chunked = handlers.onChunk;
+    const tail = carriedRaw;
+
     stop();
+
+    if (tail !== "") chunked?.(tail, 0);
     finished?.();
   };
 
@@ -162,11 +183,24 @@ export function createSpeechPlayer(): SpeechPlayer {
         flush: inputClosed,
       });
       if (next === null) break;
+
       pending = next.rest;
       chunksTaken++;
-      // A chunk that was nothing but markup or emoji leaves nothing to say.
+
+      // A span of nothing but markup or emoji has no clip of its own to be
+      // revealed against, so it waits and rides along with the next one.
       const text = speakable(next.chunk);
-      if (text !== "") queue.push({ text, boundary: next.boundary });
+      if (text === "") {
+        carriedRaw += next.raw;
+        continue;
+      }
+
+      queue.push({
+        text,
+        raw: carriedRaw + next.raw,
+        boundary: next.boundary,
+      });
+      carriedRaw = "";
     }
   };
 
@@ -226,14 +260,15 @@ export function createSpeechPlayer(): SpeechPlayer {
       );
     }
 
-    if (!announced) {
-      announced = true;
-      const delayMs = Math.max(0, (when - audio.currentTime) * 1000);
-      startTimer = setTimeout(() => {
-        startTimer = null;
-        handlers.onStart?.(motion);
-      }, delayMs);
-    }
+    // Announce on the audio clock rather than on arrival, so anything
+    // following the speech is aligned to what is actually being heard.
+    const delayMs = Math.max(0, (when - audio.currentTime) * 1000);
+    const timer = setTimeout(() => {
+      timers.delete(timer);
+      if (first) handlers.onStart?.(motion);
+      handlers.onChunk?.(chunk.raw, buffer.duration);
+    }, delayMs);
+    timers.add(timer);
   };
 
   const synthesize = async (text: string): Promise<ArrayBuffer> => {
