@@ -14,8 +14,7 @@
   --color-ink-2: var(--ink-2);
   --color-text: var(--text);
   --color-muted: var(--muted);
-  --font-display: var(--font-space-grotesk);
-  --font-mono: var(--font-plex-mono);
+  --font-display: var(--font-display), Georgia, serif;
 }
 
 html,
@@ -89,5 +88,27 @@ canvas {
   .animate-message-in,
   .animate-exchange-out {
     animation: none;
+  }
+}
+@keyframes twinkle {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.9);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
+}
+
+.animate-twinkle {
+  animation: twinkle 3.9s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-twinkle {
+    animation: none;
+    opacity: 0.6;
   }
 }

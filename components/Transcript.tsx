@@ -8,6 +8,7 @@ import {
   type TouchEvent,
   type WheelEvent,
 } from "react";
+import { Sparkle } from "@phosphor-icons/react";
 import RevealedText from "@/components/RevealedText";
 import type { Message } from "@/lib/types";
 
@@ -17,7 +18,7 @@ interface TranscriptProps {
 }
 
 const FADE =
-  "linear-gradient(to bottom, transparent 0%, black 12%, black 88%, transparent 100%)";
+  "linear-gradient(to bottom, transparent 0%, black 8%, black 88%, transparent 100%)";
 const EXIT_MS = 420;
 const REVEAL_OFFSET = 260;
 
@@ -113,20 +114,26 @@ export default function Transcript({ messages, error }: TranscriptProps) {
       onWheel={onWheel}
       onTouchStart={onTouchStart}
       onTouchMove={onTouchMove}
-      className="pointer-events-auto mx-auto h-full w-full max-w-xl overflow-y-auto px-5 py-6"
+      className="pointer-events-auto mx-auto h-full w-full max-w-xl overflow-y-auto px-5"
       style={{ maskImage: FADE, WebkitMaskImage: FADE }}
     >
-      <div className="flex min-h-full flex-col justify-end gap-5">
+      {/* Conversation opens below the orb's upper curve rather than against
+          the composer. The affordance sits in the space above it. */}
+      <div className="h-[10%]" />
+      <div className="flex h-[25%] justify-center">
         {!expanded && hidden > 0 && (
           <button
             type="button"
             onClick={expand}
-            className="animate-message-in self-center font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--muted)] transition-colors hover:text-[var(--text)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--glow)]"
+            aria-label={`Show ${hidden} earlier message${hidden === 1 ? "" : "s"}`}
+            className="animate-message-in h-fit p-1.5 text-[var(--muted)] transition-colors hover:text-[var(--glow)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--glow)]"
           >
-            {hidden} earlier
+            <Sparkle size={18} weight="fill" className="animate-twinkle" />
           </button>
         )}
+      </div>
 
+      <div className="flex flex-col gap-5 pb-6">
         {shown.map((m) => {
           const going = !expanded && leaving.some((l) => l.id === m.id);
           return (

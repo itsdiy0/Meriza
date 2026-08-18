@@ -1,17 +1,12 @@
 import type { Metadata, Viewport } from "next";
-import { Space_Grotesk, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
+import { Philosopher } from "next/font/google";
 
-const display = Space_Grotesk({
+const philosopher = Philosopher({
   subsets: ["latin"],
-  weight: ["400", "500", "600"],
-  variable: "--font-space-grotesk",
-});
-
-const mono = IBM_Plex_Mono({
-  subsets: ["latin"],
-  weight: ["400", "500"],
-  variable: "--font-plex-mono",
+  weight: ["400", "700"],
+  variable: "--font-display",
+  display: "swap",
 });
 
 export const metadata: Metadata = {
@@ -31,7 +26,7 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" className={`${display.variable} ${mono.variable}`}>
+    <html lang="en" className={`${philosopher.variable}`}>
       <body>{children}</body>
     </html>
   );
