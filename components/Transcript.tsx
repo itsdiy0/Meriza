@@ -15,6 +15,9 @@ import type { Message } from "@/lib/types";
 interface TranscriptProps {
   messages: Message[];
   error: string | null;
+  /** Id of the reply still being spoken, if any. */
+  revealing: string | null;
+  revealedWords: number;
 }
 
 const FADE =
@@ -29,8 +32,7 @@ function exchangeStart(messages: Message[]): number {
   }
   return 0;
 }
-
-export default function Transcript({ messages, error }: TranscriptProps) {
+export default function Transcript({ messages, error,  revealing,revealedWords, }: TranscriptProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState(false);
   // Kept mounted past their removal so they can fade rather than vanish.
@@ -147,16 +149,21 @@ export default function Transcript({ messages, error }: TranscriptProps) {
               <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--muted)]">
                 {m.role === "user" ? "you" : "meriza"}
               </div>
-              <p className="mt-1 max-w-md whitespace-pre-wrap text-[15px] leading-relaxed text-[var(--text)]">
+              <div className="mt-1 max-w-md text-[15px] leading-relaxed text-[var(--text)]">
                 {m.role === "assistant" ? (
-                  <RevealedText text={m.content} />
+                  <RevealedText
+                    text={m.content}
+                    visibleWords={
+                      m.id === revealing ? revealedWords : Number.MAX_SAFE_INTEGER
+                    }
+                  />
                 ) : (
-                  m.content
+                  <span className="whitespace-pre-wrap">{m.content}</span>
                 )}
                 {m.role === "assistant" && m.content === "" && (
                   <span className="inline-block h-3 w-2 animate-pulse bg-[var(--text)] align-middle" />
                 )}
-              </p>
+              </div>
             </div>
           );
         })}

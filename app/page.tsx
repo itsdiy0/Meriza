@@ -33,7 +33,10 @@ export default function Home() {
   const abortRef = useRef<AbortController | null>(null);
   const replyIdRef = useRef<string | null>(null);
 
-  const writeReply = useCallback((content: string) => {
+  const [revealed, setRevealed] = useState(0);
+
+  const writeReply = useCallback((content: string, visible: number) => {
+    setRevealed(visible);
     const id = replyIdRef.current;
     if (id === null) return;
     setMessages((prev) =>
@@ -193,7 +196,12 @@ export default function Home() {
 
       <div className="pointer-events-none absolute inset-0 flex flex-col">
         <div className="relative flex flex-1 justify-center overflow-hidden">
-          <Transcript messages={messages} error={error} />
+        <Transcript
+            messages={messages}
+            error={error}
+            revealing={replyIdRef.current}
+            revealedWords={revealed}
+          />
         </div>
         <div className="px-4 pb-[calc(env(safe-area-inset-bottom)+16px)] pt-2">
           <Composer
