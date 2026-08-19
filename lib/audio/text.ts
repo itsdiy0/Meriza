@@ -54,8 +54,14 @@ function tableRow(raw: string): string {
  * first so a keycap or flag is not left as a stray digit or half a pair.
  */
 export function speakable(text: string): string {
+  let fenced = false;
+
   const lines = text.split("\n").map((raw) => {
-    if (RULE.test(raw) || FENCE.test(raw)) return "";
+    if (FENCE.test(raw)) {
+      fenced = !fenced;
+      return "";
+    }
+    if (fenced || RULE.test(raw)) return "";
     if (TABLE_ROW.test(raw)) return tableRow(raw);
 
     const ordered = raw.match(ORDERED);
