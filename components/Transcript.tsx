@@ -8,7 +8,7 @@ import {
   type TouchEvent,
   type WheelEvent,
 } from "react";
-import { Sparkle } from "@phosphor-icons/react";
+import { Spiral } from "@phosphor-icons/react";
 import RevealedText from "@/components/RevealedText";
 import type { Message } from "@/lib/types";
 
@@ -32,7 +32,13 @@ function exchangeStart(messages: Message[]): number {
   }
   return 0;
 }
-export default function Transcript({ messages, error,  revealing,revealedWords, }: TranscriptProps) {
+
+export default function Transcript({
+  messages,
+  error,
+  revealing,
+  revealedWords,
+}: TranscriptProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState(false);
   // Kept mounted past their removal so they can fade rather than vanish.
@@ -67,17 +73,24 @@ export default function Transcript({ messages, error,  revealing,revealedWords, 
     shownRef.current = expanded ? messages : current;
   });
 
+  // Follows the bottom only once content overflows. While the exchange fits,
+  // this resolves to zero and the spacer holds it a quarter down the page.
   useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [messages, error]);
+  }, [messages, error, expanded]);
+
+  const collapse = useCallback(() => {
+    setExpanded(false);
+    const el = scrollRef.current;
+    if (el) el.scrollTop = 0;
+  }, []);
 
   /**
    * Opens the history without moving the current exchange, then eases up far
    * enough that the reveal is visible rather than only becoming scrollable.
    */
   const expand = useCallback(() => {
-    if (expanded || history.length === 0) return;
     setExpanded(true);
 
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -90,9 +103,24 @@ export default function Transcript({ messages, error,  revealing,revealedWords, 
         behavior: reduced ? "auto" : "smooth",
       });
     });
-  }, [expanded, history.length]);
+  }, []);
+
+  const toggle = useCallback(() => {
+    if (expanded) collapse();
+    else expand();
+  }, [expanded, expand, collapse]);
+
+  useEffect(() => {
+    if (!expanded) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") collapse();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [expanded, collapse]);
 
   const onWheel = (e: WheelEvent<HTMLDivElement>) => {
+    if (expanded || history.length === 0) return;
     if (e.deltaY < 0 && e.currentTarget.scrollTop <= 0) expand();
   };
 
@@ -101,6 +129,7 @@ export default function Transcript({ messages, error,  revealing,revealedWords, 
     touchY.current = e.touches[0].clientY;
   };
   const onTouchMove = (e: TouchEvent<HTMLDivElement>) => {
+    if (expanded || history.length === 0) return;
     const dragged = e.touches[0].clientY - touchY.current;
     if (dragged > 24 && e.currentTarget.scrollTop <= 0) expand();
   };
@@ -116,21 +145,34 @@ export default function Transcript({ messages, error,  revealing,revealedWords, 
       onWheel={onWheel}
       onTouchStart={onTouchStart}
       onTouchMove={onTouchMove}
-      className="pointer-events-auto mx-auto h-full w-full max-w-xl overflow-y-auto px-5"
+      className="scrollbar-quiet pointer-events-auto mx-auto h-full w-full max-w-xl overflow-y-auto px-5"
       style={{ maskImage: FADE, WebkitMaskImage: FADE }}
     >
-      {/* Conversation opens below the orb's upper curve rather than against
-          the composer. The affordance sits in the space above it. */}
-      <div className="h-[10%]" />
-      <div className="flex h-[25%] justify-center">
-        {!expanded && hidden > 0 && (
+      {/* Reserves the space that opens the conversation a quarter down the
+          page, with the affordance sitting near the top of it. Viewport units
+          rather than percentages, which would resolve against width. */}
+      <div className="flex h-[25dvh] justify-center pt-[9dvh]">
+        {hidden > 0 && (
           <button
             type="button"
-            onClick={expand}
-            aria-label={`Show ${hidden} earlier message${hidden === 1 ? "" : "s"}`}
+            onClick={toggle}
+            aria-expanded={expanded}
+            aria-label={
+              expanded
+                ? "Hide earlier messages"
+                : `Show ${hidden} earlier message${hidden === 1 ? "" : "s"}`
+            }
             className="animate-message-in h-fit p-1.5 text-[var(--muted)] transition-colors hover:text-[var(--glow)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--glow)]"
           >
-            <Sparkle size={18} weight="fill" className="animate-twinkle" />
+            <Spiral
+              size={20}
+              weight="bold"
+              className={`transition-transform duration-500 ${
+                expanded
+                  ? "rotate-180 text-[var(--glow)]"
+                  : "animate-twinkle rotate-0"
+              }`}
+            />
           </button>
         )}
       </div>
@@ -154,7 +196,9 @@ export default function Transcript({ messages, error,  revealing,revealedWords, 
                   <RevealedText
                     text={m.content}
                     visibleWords={
-                      m.id === revealing ? revealedWords : Number.MAX_SAFE_INTEGER
+                      m.id === revealing
+                        ? revealedWords
+                        : Number.MAX_SAFE_INTEGER
                     }
                   />
                 ) : (
