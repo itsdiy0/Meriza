@@ -3,10 +3,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Composer from "@/components/Composer";
 import Orb from "@/components/Orb";
+import Settings from "@/components/Settings";
 import Transcript from "@/components/Transcript";
+import ViewToggle from "@/components/ViewToggle";
 import { createSpeechPlayer, type SpeechPlayer } from "@/lib/audio/speech";
 import { createMotionMixer, type MotionMixer } from "@/lib/orb/motion/mixer";
 import { createWaitingSource } from "@/lib/orb/motion/waiting";
+import { useSettings } from "@/lib/settings/useSettings";
 import { createRevealer, type Revealer } from "@/lib/transcript/reveal";
 import type { ChatStreamChunk, Message, OrbState } from "@/lib/types";
 
@@ -21,6 +24,11 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
   const [speaking, setSpeaking] = useState(false);
+  const [revealed, setRevealed] = useState(0);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
+  const settings = useSettings();
+  const { settings: prefs, set: setPref } = settings;
 
   const mixerRef = useRef<MotionMixer | null>(null);
   if (mixerRef.current === null) mixerRef.current = createMotionMixer();
@@ -32,8 +40,6 @@ export default function Home() {
 
   const abortRef = useRef<AbortController | null>(null);
   const replyIdRef = useRef<string | null>(null);
-
-  const [revealed, setRevealed] = useState(0);
 
   const writeReply = useCallback((content: string, visible: number) => {
     setRevealed(visible);
@@ -194,9 +200,16 @@ export default function Home() {
     <main className="relative h-[100dvh] w-full overflow-hidden">
       <Orb state={orbState} onFrame={onFrame} />
 
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-30 flex justify-end p-4">
+        <ViewToggle
+          value={prefs.view}
+          onChange={(view) => setPref("view", view)}
+        />
+      </div>
+
       <div className="pointer-events-none absolute inset-0 flex flex-col">
         <div className="relative flex flex-1 justify-center overflow-hidden">
-        <Transcript
+          <Transcript
             messages={messages}
             error={error}
             revealing={replyIdRef.current}
@@ -207,10 +220,17 @@ export default function Home() {
           <Composer
             onSend={send}
             onStop={stop}
+            onSettings={() => setSettingsOpen(true)}
             active={generating || speaking}
           />
         </div>
       </div>
+
+      <Settings
+        {...settings}
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+      />
     </main>
   );
 }
