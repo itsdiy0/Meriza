@@ -196,9 +196,26 @@ export default function Home() {
     };
   }, [player, revealer]);
 
+  const split = prefs.view !== "overlay";
+  const orbFirst = prefs.view === "left";
+
   return (
     <main className="relative h-[100dvh] w-full overflow-hidden">
-      <Orb state={orbState} onFrame={onFrame} />
+      {/* The orb keeps one continuous scene across every arrangement, so a
+          view change slides it rather than tearing down its WebGL context.
+          Below the breakpoint there is no room to split and it fills the
+          viewport regardless of the setting. */}
+      <div
+        className={`absolute inset-y-0 transition-[left,right] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none ${
+          split
+            ? orbFirst
+              ? "left-0 right-0 md:right-1/2"
+              : "left-0 right-0 md:left-1/2"
+            : "left-0 right-0"
+        }`}
+      >
+        <Orb state={orbState} onFrame={onFrame} />
+      </div>
 
       <div className="pointer-events-none absolute inset-x-0 top-0 z-30 flex justify-end p-4">
         <ViewToggle
@@ -208,13 +225,23 @@ export default function Home() {
       </div>
 
       <div className="pointer-events-none absolute inset-0 flex flex-col">
-        <div className="relative flex flex-1 justify-center overflow-hidden">
-          <Transcript
-            messages={messages}
-            error={error}
-            revealing={replyIdRef.current}
-            revealedWords={revealed}
-          />
+        <div className="relative flex flex-1 overflow-hidden">
+          <div
+            className={`flex h-full w-full transition-[padding] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none ${
+              split
+                ? orbFirst
+                  ? "md:pl-[50%]"
+                  : "md:pr-[50%]"
+                : ""
+            }`}
+          >
+            <Transcript
+              messages={messages}
+              error={error}
+              revealing={replyIdRef.current}
+              revealedWords={revealed}
+            />
+          </div>
         </div>
         <div className="px-4 pb-[calc(env(safe-area-inset-bottom)+16px)] pt-2">
           <Composer

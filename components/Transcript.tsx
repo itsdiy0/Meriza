@@ -18,6 +18,8 @@ interface TranscriptProps {
   /** Id of the reply still being spoken, if any. */
   revealing: string | null;
   revealedWords: number;
+  /** True when the transcript has its own column rather than sitting over the
+   *  orb. Messages align to one edge instead of pulling apart. */
 }
 
 const FADE =
