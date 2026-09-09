@@ -22,7 +22,6 @@ interface TranscriptProps {
 }
 
 const EXIT_MS = 420;
-const ANCHOR = "top-[25dvh]";
 
 /** Index of the message opening the current exchange, the latest user turn. */
 function exchangeStart(messages: Message[]): number {
@@ -134,7 +133,10 @@ export default function Transcript({
     rewind();
   }, [rewind]);
 
-  /** Opens the history above, keeping the view at the recent end of it. */
+  /**
+   * Opens the history above. The padding holds the current exchange at the
+   * anchor, so scrolling to the end lands on it with the history overhead.
+   */
   const expand = useCallback(() => {
     setExpanded(true);
     requestAnimationFrame(() => {
@@ -224,9 +226,9 @@ export default function Transcript({
       {!expanded && leaving.length > 0 && (
         <div
           aria-hidden
-          className={`pointer-events-none absolute inset-x-0 ${ANCHOR} overflow-hidden`}
+          className="pointer-events-none absolute inset-0 overflow-hidden"
         >
-          <div className="mx-auto flex w-full max-w-xl flex-col gap-5 px-5">
+          <div className="mx-auto flex w-full max-w-xl flex-col gap-5 px-5 pt-[25dvh]">
             {leaving.map((m) => (
               <div
                 key={m.id}
@@ -245,21 +247,20 @@ export default function Transcript({
         </div>
       )}
 
-      {/* One box, always in the same place. Its top edge is the anchor, so
-          every exchange opens a quarter down the page and grows downward from
-          there. Nothing scrolls it automatically. */}
+      {/* The anchor is padding rather than a scroll position or an offset top
+          edge, so nothing can clamp it or scroll it away: a fresh exchange
+          always opens a quarter down the page and grows downward. Expanded
+          stacks the history into that space above it. */}
       <div
         ref={scrollRef}
         onScroll={onScroll}
         onWheel={onWheel}
         onTouchStart={onTouchStart}
         onTouchMove={onTouchMove}
-        className={`scrollbar-quiet pointer-events-auto absolute inset-x-0 bottom-0 overflow-y-auto ${
-          expanded ? "top-0" : ANCHOR
-        }`}
+        className="scrollbar-quiet pointer-events-auto absolute inset-0 overflow-y-auto"
         style={{ maskImage: fade, WebkitMaskImage: fade }}
       >
-        <div className="mx-auto flex w-full max-w-xl flex-col gap-5 px-5 pb-6">
+        <div className="mx-auto flex w-full max-w-xl flex-col gap-5 px-5 pb-6 pt-[25dvh]">
           {shown.map((m) => (
             <div
               key={m.id}
