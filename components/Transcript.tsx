@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
   type TouchEvent,
+  type UIEvent,
   type WheelEvent,
 } from "react";
 import { Spiral } from "@phosphor-icons/react";
@@ -18,14 +19,10 @@ interface TranscriptProps {
   /** Id of the reply still being spoken, if any. */
   revealing: string | null;
   revealedWords: number;
-  /** True when the transcript has its own column rather than sitting over the
-   *  orb. Messages align to one edge instead of pulling apart. */
 }
 
-const FADE =
-  "linear-gradient(to bottom, transparent 0%, black 8%, black 88%, transparent 100%)";
 const EXIT_MS = 420;
-const REVEAL_OFFSET = 260;
+const ANCHOR = "top-[25dvh]";
 
 /** Index of the message opening the current exchange, the latest user turn. */
 function exchangeStart(messages: Message[]): number {
@@ -33,6 +30,39 @@ function exchangeStart(messages: Message[]): number {
     if (messages[i].role === "user") return i;
   }
   return 0;
+}
+
+interface BubbleProps {
+  message: Message;
+  revealing: string | null;
+  revealedWords: number;
+}
+
+function Bubble({ message, revealing, revealedWords }: BubbleProps) {
+  return (
+    <>
+      <div className="text-lift font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--muted)]">
+        {message.role === "user" ? "you" : "meriza"}
+      </div>
+      <div className="text-lift mt-1 max-w-md text-[15px] leading-relaxed text-[var(--text)]">
+        {message.role === "assistant" ? (
+          <RevealedText
+            text={message.content}
+            visibleWords={
+              message.id === revealing
+                ? revealedWords
+                : Number.MAX_SAFE_INTEGER
+            }
+          />
+        ) : (
+          <span className="whitespace-pre-wrap">{message.content}</span>
+        )}
+        {message.role === "assistant" && message.content === "" && (
+          <span className="inline-block h-3 w-2 animate-pulse bg-[var(--text)] align-middle" />
+        )}
+      </div>
+    </>
+  );
 }
 
 export default function Transcript({
@@ -43,7 +73,9 @@ export default function Transcript({
 }: TranscriptProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState(false);
-  // Kept mounted past their removal so they can fade rather than vanish.
+  const [scrolled, setScrolled] = useState(false);
+  // Held past their removal so they can fade. Rendered out of flow, so a stuck
+  // exit can never displace the exchange that replaced them.
   const [leaving, setLeaving] = useState<Message[]>([]);
 
   const cut = exchangeStart(messages);
@@ -53,57 +85,63 @@ export default function Transcript({
 
   const anchorRef = useRef<string | null>(anchorId);
   const shownRef = useRef<Message[]>(current);
+  const exitRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // A new exchange collapses whatever was open. Anything that was on screen
-  // and is not part of the new turn leaves, and holds long enough to fade.
+  const rewind = useCallback(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollTop = 0;
+    setScrolled(false);
+  }, []);
+
+  // A new exchange collapses whatever was open and returns to the anchor.
+  // Everything previously on screen is leaving by definition, since a new turn
+  // makes all of it history. Depends on the anchor id alone: a derived array
+  // here would change identity every render, and its cleanup would cancel the
+  // exit timer before it could ever fire.
   useEffect(() => {
     if (anchorRef.current === anchorId) return;
     anchorRef.current = anchorId;
 
-    const ids = new Set(current.map((m) => m.id));
-    const gone = shownRef.current.filter((m) => !ids.has(m.id));
-
+    const gone = shownRef.current;
     setExpanded(false);
-    if (gone.length === 0) return;
+    rewind();
+
+    if (exitRef.current !== null) clearTimeout(exitRef.current);
+    if (gone.length === 0) {
+      setLeaving([]);
+      return;
+    }
 
     setLeaving(gone);
-    const timer = setTimeout(() => setLeaving([]), EXIT_MS);
-    return () => clearTimeout(timer);
-  }, [anchorId, current]);
+    exitRef.current = setTimeout(() => {
+      exitRef.current = null;
+      setLeaving([]);
+    }, EXIT_MS);
+  }, [anchorId, rewind]);
+
+  useEffect(() => {
+    return () => {
+      if (exitRef.current !== null) clearTimeout(exitRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     shownRef.current = expanded ? messages : current;
   });
 
-  // Follows the bottom only once content overflows. While the exchange fits,
-  // this resolves to zero and the spacer holds it a quarter down the page.
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [messages, error, expanded]);
-
   const collapse = useCallback(() => {
     setExpanded(false);
-    const el = scrollRef.current;
-    if (el) el.scrollTop = 0;
-  }, []);
+    rewind();
+  }, [rewind]);
 
-  /**
-   * Opens the history without moving the current exchange, then eases up far
-   * enough that the reveal is visible rather than only becoming scrollable.
-   */
+  /** Opens the history above, keeping the view at the recent end of it. */
   const expand = useCallback(() => {
     setExpanded(true);
-
-    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     requestAnimationFrame(() => {
       const el = scrollRef.current;
       if (!el) return;
       el.scrollTop = el.scrollHeight;
-      el.scrollBy({
-        top: -REVEAL_OFFSET,
-        behavior: reduced ? "auto" : "smooth",
-      });
+      setScrolled(el.scrollTop > 4);
     });
   }, []);
 
@@ -120,6 +158,10 @@ export default function Transcript({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [expanded, collapse]);
+
+  const onScroll = (e: UIEvent<HTMLDivElement>) => {
+    setScrolled(e.currentTarget.scrollTop > 4);
+  };
 
   const onWheel = (e: WheelEvent<HTMLDivElement>) => {
     if (expanded || history.length === 0) return;
@@ -138,23 +180,21 @@ export default function Transcript({
 
   if (messages.length === 0 && !error) return null;
 
-  const shown = expanded ? messages : [...leaving, ...current];
+  const shown = expanded ? messages : current;
   const hidden = history.length;
 
+  // Only softens the top edge once something has scrolled past it, so the
+  // first line of a fresh exchange is never dimmed.
+  const fade = scrolled
+    ? "linear-gradient(to bottom, transparent 0%, black 7%, black 90%, transparent 100%)"
+    : "linear-gradient(to bottom, black 0%, black 90%, transparent 100%)";
+
   return (
-    <div
-      ref={scrollRef}
-      onWheel={onWheel}
-      onTouchStart={onTouchStart}
-      onTouchMove={onTouchMove}
-      className="scrollbar-quiet pointer-events-auto mx-auto h-full w-full max-w-xl overflow-y-auto px-5"
-      style={{ maskImage: FADE, WebkitMaskImage: FADE }}
-    >
-      {/* Reserves the space that opens the conversation a quarter down the
-          page, with the affordance sitting near the top of it. Viewport units
-          rather than percentages, which would resolve against width. */}
-      <div className="flex h-[25dvh] justify-center pt-[9dvh]">
-        {hidden > 0 && (
+    <div className="pointer-events-none absolute inset-0">
+      {/* Pinned to the viewport rather than carried by the scroll, so it stays
+          reachable however far the history is scrolled. */}
+      {hidden > 0 && (
+        <div className="absolute inset-x-0 top-[9dvh] z-20 flex justify-center">
           <button
             type="button"
             onClick={toggle}
@@ -164,7 +204,7 @@ export default function Transcript({
                 ? "Hide earlier messages"
                 : `Show ${hidden} earlier message${hidden === 1 ? "" : "s"}`
             }
-            className="animate-message-in h-fit p-1.5 text-[var(--muted)] transition-colors hover:text-[var(--glow)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--glow)]"
+            className="animate-message-in pointer-events-auto p-1.5 text-[var(--muted)] transition-colors hover:text-[var(--glow)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--glow)]"
           >
             <Spiral
               size={20}
@@ -176,47 +216,71 @@ export default function Transcript({
               }`}
             />
           </button>
-        )}
-      </div>
+        </div>
+      )}
 
-      <div className="flex flex-col gap-5 pb-6">
-        {shown.map((m) => {
-          const going = !expanded && leaving.some((l) => l.id === m.id);
-          return (
+      {/* The outgoing exchange, over the top of the incoming one and outside
+          its layout entirely. */}
+      {!expanded && leaving.length > 0 && (
+        <div
+          aria-hidden
+          className={`pointer-events-none absolute inset-x-0 ${ANCHOR} overflow-hidden`}
+        >
+          <div className="mx-auto flex w-full max-w-xl flex-col gap-5 px-5">
+            {leaving.map((m) => (
+              <div
+                key={m.id}
+                className={`animate-exchange-out ${
+                  m.role === "user" ? "self-end text-right" : "self-start"
+                }`}
+              >
+                <Bubble
+                  message={m}
+                  revealing={null}
+                  revealedWords={Number.MAX_SAFE_INTEGER}
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* One box, always in the same place. Its top edge is the anchor, so
+          every exchange opens a quarter down the page and grows downward from
+          there. Nothing scrolls it automatically. */}
+      <div
+        ref={scrollRef}
+        onScroll={onScroll}
+        onWheel={onWheel}
+        onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
+        className={`scrollbar-quiet pointer-events-auto absolute inset-x-0 bottom-0 overflow-y-auto ${
+          expanded ? "top-0" : ANCHOR
+        }`}
+        style={{ maskImage: fade, WebkitMaskImage: fade }}
+      >
+        <div className="mx-auto flex w-full max-w-xl flex-col gap-5 px-5 pb-6">
+          {shown.map((m) => (
             <div
               key={m.id}
-              aria-hidden={going}
-              className={`${
+              className={`animate-message-in ${
                 m.role === "user" ? "self-end text-right" : "self-start"
-              } ${going ? "animate-exchange-out" : "animate-message-in"}`}
+              }`}
             >
-              <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--muted)]">
-                {m.role === "user" ? "you" : "meriza"}
-              </div>
-              <div className="mt-1 max-w-md text-[15px] leading-relaxed text-[var(--text)]">
-                {m.role === "assistant" ? (
-                  <RevealedText
-                    text={m.content}
-                    visibleWords={
-                      m.id === revealing
-                        ? revealedWords
-                        : Number.MAX_SAFE_INTEGER
-                    }
-                  />
-                ) : (
-                  <span className="whitespace-pre-wrap">{m.content}</span>
-                )}
-                {m.role === "assistant" && m.content === "" && (
-                  <span className="inline-block h-3 w-2 animate-pulse bg-[var(--text)] align-middle" />
-                )}
-              </div>
+              <Bubble
+                message={m}
+                revealing={revealing}
+                revealedWords={revealedWords}
+              />
             </div>
-          );
-        })}
+          ))}
 
-        {error && (
-          <p className="self-start font-mono text-xs text-[#FF8A5C]">{error}</p>
-        )}
+          {error && (
+            <p className="text-lift self-start font-mono text-xs text-[#FF8A5C]">
+              {error}
+            </p>
+          )}
+        </div>
       </div>
     </div>
   );

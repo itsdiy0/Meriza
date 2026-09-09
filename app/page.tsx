@@ -225,14 +225,10 @@ export default function Home() {
       </div>
 
       <div className="pointer-events-none absolute inset-0 flex flex-col">
-        <div className="relative flex flex-1 overflow-hidden">
+      <div className="relative flex flex-1 overflow-hidden">
           <div
-            className={`flex h-full w-full transition-[padding] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none ${
-              split
-                ? orbFirst
-                  ? "md:pl-[50%]"
-                  : "md:pr-[50%]"
-                : ""
+            className={`relative h-full w-full transition-[padding] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none ${
+              split ? (orbFirst ? "md:pl-[50%]" : "md:pr-[50%]") : ""
             }`}
           >
             <Transcript
