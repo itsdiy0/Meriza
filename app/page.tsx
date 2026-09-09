@@ -227,8 +227,12 @@ export default function Home() {
       <div className="pointer-events-none absolute inset-0 flex flex-col">
       <div className="relative flex flex-1 overflow-hidden">
           <div
-            className={`relative h-full w-full transition-[padding] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none ${
-              split ? (orbFirst ? "md:pl-[50%]" : "md:pr-[50%]") : ""
+            className={`absolute inset-y-0 transition-[left,right] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none ${
+              split
+                ? orbFirst
+                  ? "left-0 right-0 md:left-1/2"
+                  : "left-0 right-0 md:right-1/2"
+                : "left-0 right-0"
             }`}
           >
             <Transcript
