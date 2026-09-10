@@ -139,3 +139,12 @@ canvas {
 .scrollbar-quiet::-webkit-scrollbar-thumb:hover {
   background: color-mix(in srgb, var(--glow) 45%, transparent);
 }
+
+/* Darkens the points immediately behind each glyph so text stays legible over
+   the orb, without a panel that would break the sense of one object. */
+   .text-lift {
+    text-shadow:
+      0 0 2px var(--ink),
+      0 0 10px var(--ink),
+      0 0 22px color-mix(in srgb, var(--ink) 80%, transparent);
+  }
