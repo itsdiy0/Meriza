@@ -85,10 +85,14 @@ export default function Transcript({
   const anchorRef = useRef<string | null>(anchorId);
   const shownRef = useRef<Message[]>(current);
   const exitRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Whether the view still tracks the end of the reply. Cleared by scrolling
+  // up, taken again by the next exchange.
+  const pinnedRef = useRef(true);
 
   const rewind = useCallback(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = 0;
+    pinnedRef.current = true;
     setScrolled(false);
   }, []);
 
@@ -128,6 +132,15 @@ export default function Transcript({
     shownRef.current = expanded ? messages : current;
   });
 
+  // Follows the reply as it grows, so a long one runs off the bottom rather
+  // than off the screen. Scrolling up releases it, since reading back should
+  // not be yanked, and the next exchange takes it again.
+  useEffect(() => {
+    if (expanded || !pinnedRef.current) return;
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [messages, revealedWords, expanded]);
+
   const collapse = useCallback(() => {
     setExpanded(false);
     rewind();
@@ -162,7 +175,9 @@ export default function Transcript({
   }, [expanded, collapse]);
 
   const onScroll = (e: UIEvent<HTMLDivElement>) => {
-    setScrolled(e.currentTarget.scrollTop > 4);
+    const el = e.currentTarget;
+    setScrolled(el.scrollTop > 4);
+    pinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
   };
 
   const onWheel = (e: WheelEvent<HTMLDivElement>) => {
@@ -185,11 +200,11 @@ export default function Transcript({
   const shown = expanded ? messages : current;
   const hidden = history.length;
 
-  // Only softens the top edge once something has scrolled past it, so the
-  // first line of a fresh exchange is never dimmed.
+  // Softens both edges of the box. The top only fades once something has
+  // scrolled past it, so the first line of a fresh exchange is never dimmed.
   const fade = scrolled
-    ? "linear-gradient(to bottom, transparent 0%, black 7%, black 90%, transparent 100%)"
-    : "linear-gradient(to bottom, black 0%, black 90%, transparent 100%)";
+    ? "linear-gradient(to bottom, transparent 0%, black 7%, black 78%, transparent 96%)"
+    : "linear-gradient(to bottom, black 0%, black 78%, transparent 96%)";
 
   return (
     <div className="pointer-events-none absolute inset-0">
@@ -222,7 +237,7 @@ export default function Transcript({
       )}
 
       {/* The outgoing exchange, over the top of the incoming one and outside
-          its layout entirely. */}
+          its layout entirely. Static, so it needs no bottom padding. */}
       {!expanded && leaving.length > 0 && (
         <div
           aria-hidden
@@ -249,8 +264,9 @@ export default function Transcript({
 
       {/* The anchor is padding rather than a scroll position or an offset top
           edge, so nothing can clamp it or scroll it away: a fresh exchange
-          always opens a quarter down the page and grows downward. Expanded
-          stacks the history into that space above it. */}
+          always opens a quarter down the page and grows downward. The bottom
+          padding matches the fade region, so scrolled to the end the last line
+          sits clear of it rather than under the composer. */}
       <div
         ref={scrollRef}
         onScroll={onScroll}
@@ -260,7 +276,7 @@ export default function Transcript({
         className="scrollbar-quiet pointer-events-auto absolute inset-0 overflow-y-auto"
         style={{ maskImage: fade, WebkitMaskImage: fade }}
       >
-        <div className="mx-auto flex w-full max-w-xl flex-col gap-5 px-5 pb-6 pt-[25dvh]">
+        <div className="mx-auto flex w-full max-w-xl flex-col gap-5 px-5 pb-[24dvh] pt-[25dvh]">
           {shown.map((m) => (
             <div
               key={m.id}
