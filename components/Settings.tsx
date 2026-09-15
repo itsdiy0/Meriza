@@ -1,71 +1,70 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { X } from "@phosphor-icons/react";
 import type { SettingsHandle } from "@/lib/settings/useSettings";
+import type { TTSVoice } from "@/lib/tts/provider";
 
 interface SettingsProps extends SettingsHandle {
   open: boolean;
   onClose: () => void;
 }
 
-interface RowProps {
+/** Kokoro encodes language and gender in the id, as `<language><gender>_name`. */
+const LANGUAGES: Record<string, string> = {
+  a: "American English",
+  b: "British English",
+  e: "Spanish",
+  f: "French",
+  h: "Hindi",
+  i: "Italian",
+  j: "Japanese",
+  p: "Portuguese",
+  z: "Mandarin",
+};
+
+const ORDER = ["a", "b", "e", "f", "h", "i", "j", "p", "z"];
+
+interface Grouped {
   label: string;
-  hint?: string;
-  children: React.ReactNode;
-}
-
-function Row({ label, hint, children }: RowProps) {
-  return (
-    <div className="flex flex-col gap-2">
-      <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--muted)]">
-        {label}
-      </div>
-      {children}
-      {hint && <p className="text-[13px] text-[var(--muted)]">{hint}</p>}
-    </div>
-  );
-}
-
-interface ChoiceProps<T extends string> {
-  value: T;
-  options: { value: T; label: string }[];
-  onChange: (value: T) => void;
-}
-
-function Choice<T extends string>({ value, options, onChange }: ChoiceProps<T>) {
-  return (
-    <div
-      role="radiogroup"
-      className="flex gap-1 rounded-full border border-[var(--line)] p-1"
-    >
-      {options.map((option) => {
-        const active = option.value === value;
-        return (
-          <button
-            key={option.value}
-            type="button"
-            role="radio"
-            aria-checked={active}
-            onClick={() => onChange(option.value)}
-            className={`flex-1 rounded-full px-3 py-1.5 text-[13px] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--glow)] ${
-              active
-                ? "bg-[var(--text)] text-[var(--ink)]"
-                : "text-[var(--muted)] hover:text-[var(--text)]"
-            }`}
-          >
-            {option.label}
-          </button>
-        );
-      })}
-    </div>
-  );
+  voices: { id: string; name: string; gender: string }[];
 }
 
 /**
- * The settings surface. Deliberately sparse: it holds what exists rather than
- * reserving space for what is planned, so it does not read as half-built.
+ * Groups voices by the language their id encodes. An engine that names voices
+ * differently falls through to one ungrouped list rather than an empty picker.
  */
+function group(voices: TTSVoice[]): Grouped[] {
+  const buckets = new Map<string, Grouped["voices"]>();
+  const loose: Grouped["voices"] = [];
+
+  for (const voice of voices) {
+    const match = voice.id.match(/^([a-z])([fm])_(.+)$/);
+    if (match === null || !(match[1] in LANGUAGES)) {
+      loose.push({ id: voice.id, name: voice.name, gender: "" });
+      continue;
+    }
+    const [, language, gender, name] = match;
+    const entry = {
+      id: voice.id,
+      name: name.replace(/^v0/, "").replace(/^./, (c) => c.toUpperCase()),
+      gender,
+    };
+    const bucket = buckets.get(language);
+    if (bucket) bucket.push(entry);
+    else buckets.set(language, [entry]);
+  }
+
+  const groups = ORDER.filter((key) => buckets.has(key)).map((key) => ({
+    label: LANGUAGES[key],
+    voices: buckets.get(key)!,
+  }));
+
+  return loose.length > 0
+    ? [...groups, { label: "Other", voices: loose }]
+    : groups;
+}
+
 export default function Settings({
   open,
   onClose,
@@ -73,6 +72,8 @@ export default function Settings({
   set,
 }: SettingsProps) {
   const panelRef = useRef<HTMLDivElement>(null);
+  const [voices, setVoices] = useState<TTSVoice[]>([]);
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -83,6 +84,26 @@ export default function Settings({
     panelRef.current?.focus();
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
+
+  // Fetched on open rather than on mount: the engine may not be running, and
+  // a failed request should not cost anything until the picker is wanted.
+  useEffect(() => {
+    if (!open || voices.length > 0) return;
+    let live = true;
+    fetch("/api/tts/voices")
+      .then((res) => (res.ok ? res.json() : Promise.reject()))
+      .then((data: { voices: TTSVoice[] }) => {
+        if (live) setVoices(data.voices);
+      })
+      .catch(() => {
+        if (live) setFailed(true);
+      });
+    return () => {
+      live = false;
+    };
+  }, [open, voices.length]);
+
+  const grouped = useMemo(() => group(voices), [voices]);
 
   if (!open) return null;
 
@@ -106,7 +127,7 @@ export default function Settings({
       >
         <div className="mb-6 flex items-center justify-between">
           <h2 className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--muted)]">
-            settings
+            voice
           </h2>
           <button
             type="button"
@@ -119,29 +140,50 @@ export default function Settings({
         </div>
 
         <div className="flex flex-col gap-6">
-          <Row label="layout">
-            <Choice
-              value={settings.layout}
-              onChange={(value) => set("layout", value)}
-              options={[
-                { value: "overlay", label: "Overlay" },
-                { value: "split", label: "Split" },
-              ]}
-            />
-          </Row>
+          <label className="flex flex-col gap-2">
+            <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--muted)]">
+              speaker
+            </span>
+            {failed ? (
+              <span className="text-[13px] text-[var(--muted)]">
+                The speech engine is not reachable.
+              </span>
+            ) : (
+              <select
+                value={settings.voice ?? ""}
+                onChange={(e) => set("voice", e.target.value || null)}
+                className="rounded-lg border border-[var(--line)] bg-transparent px-3 py-2 text-[14px] text-[var(--text)] focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--glow)]"
+              >
+                <option value="">Engine default</option>
+                {grouped.map((g) => (
+                  <optgroup key={g.label} label={g.label}>
+                    {g.voices.map((v) => (
+                      <option key={v.id} value={v.id}>
+                        {v.name}
+                        {v.gender === "" ? "" : ` (${v.gender})`}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+            )}
+          </label>
 
-          {settings.layout === "split" && (
-            <Row label="orb side">
-              <Choice
-                value={settings.side}
-                onChange={(value) => set("side", value)}
-                options={[
-                  { value: "left", label: "Left" },
-                  { value: "right", label: "Right" },
-                ]}
-              />
-            </Row>
-          )}
+          <label className="flex flex-col gap-2">
+            <span className="flex items-baseline justify-between font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--muted)]">
+              pace
+              <span className="tabular-nums">{settings.speed.toFixed(2)}x</span>
+            </span>
+            <input
+              type="range"
+              min={0.5}
+              max={2}
+              step={0.05}
+              value={settings.speed}
+              onChange={(e) => set("speed", Number(e.target.value))}
+              className="accent-[var(--text)]"
+            />
+          </label>
         </div>
       </div>
     </div>

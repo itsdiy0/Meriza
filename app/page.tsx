@@ -37,7 +37,9 @@ export default function Home() {
   const playerRef = useRef<SpeechPlayer | null>(null);
   if (playerRef.current === null) playerRef.current = createSpeechPlayer();
   const player = playerRef.current;
-
+  const prefsRef = useRef(prefs);
+  prefsRef.current = prefs;
+  
   const abortRef = useRef<AbortController | null>(null);
   const replyIdRef = useRef<string | null>(null);
 
@@ -107,23 +109,29 @@ export default function Home() {
       // Inside the send gesture, which is the only place iOS Safari will
       // honour a resume.
       await player.unlock();
-      player.start({
-        onStart: (audioSource) => {
-          setOrbState("responding");
-          mixer.play(audioSource, 0.15);
+      player.start(
+        {
+          onStart: (audioSource) => {
+            setOrbState("responding");
+            mixer.play(audioSource, 0.15);
+          },
+          onChunk: (spoken, seconds) => revealer.push(spoken, seconds),
+          onEnd: () => {
+            revealer.flush();
+            mixer.clear();
+            setOrbState("idle");
+            setSpeaking(false);
+          },
+          onError: () => {
+            setError("Voice playback failed");
+            stop();
+          },
         },
-        onChunk: (spoken, seconds) => revealer.push(spoken, seconds),
-        onEnd: () => {
-          revealer.flush();
-          mixer.clear();
-          setOrbState("idle");
-          setSpeaking(false);
+        {
+          voice: prefsRef.current.voice ?? undefined,
+          speed: prefsRef.current.speed,
         },
-        onError: () => {
-          setError("Voice playback failed");
-          stop();
-        },
-      });
+      );
 
       const controller = new AbortController();
       abortRef.current = controller;

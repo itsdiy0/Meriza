@@ -43,6 +43,13 @@ interface QueuedChunk {
   boundary: ChunkBoundary;
 }
 
+export interface SpeechOptions {
+  voice?: string;
+  speed?: number;
+}
+
+let options: SpeechOptions = {};
+
 export interface SpeechHandlers {
   /** Fires as the first clip becomes audible, not when it is scheduled. */
   onStart?(source: AnalyserSource): void;
@@ -65,7 +72,7 @@ export interface SpeechPlayer {
   /** Creates or resumes the AudioContext. Must run inside a user gesture. */
   unlock(): Promise<void>;
   /** Opens an utterance, superseding any in progress. */
-  start(handlers?: SpeechHandlers): void;
+  start(handlers?: SpeechHandlers, options?: SpeechOptions): void;
   /** Adds text. Partial sentences are held until they complete. */
   push(text: string): void;
   /** Closes input. The utterance ends once the queue drains and plays out. */
@@ -276,7 +283,7 @@ export function createSpeechPlayer(): SpeechPlayer {
     const res = await fetch("/api/tts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text }),
+      body: JSON.stringify({ text, ...options }),
       signal: controller.signal,
     });
     if (!res.ok) throw new Error(`TTS request failed: ${res.status}`);
@@ -321,9 +328,10 @@ export function createSpeechPlayer(): SpeechPlayer {
       if (audio.state === "suspended") await audio.resume();
     },
 
-    start(next = {}) {
+    start(next = {}, spoken = {}) {
       stop();
       handlers = next;
+      options = spoken;
       inputClosed = false;
     },
 
