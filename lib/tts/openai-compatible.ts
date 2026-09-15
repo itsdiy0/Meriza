@@ -1,11 +1,32 @@
-import { TTSProvider } from './provider';
+import type { TTSOptions, TTSProvider, TTSVoice } from "@/lib/tts/provider";
 
-export type TTSAudioFormat = 'wav' | 'mp3';
+export type TTSAudioFormat = "wav" | "mp3";
 
 const CONTENT_TYPES: Record<TTSAudioFormat, string> = {
-  wav: 'audio/wav',
-  mp3: 'audio/mpeg',
+  wav: "audio/wav",
+  mp3: "audio/mpeg",
 };
+
+/**
+ * Normalizes the voices payload. Engines disagree on the shape: a bare array
+ * of strings, an array of objects, or either wrapped in a `voices` key. All of
+ * them are accepted rather than assuming one, since the point of this client
+ * is that the engine is swappable.
+ */
+function readVoices(payload: unknown): TTSVoice[] {
+  const list = Array.isArray(payload)
+    ? payload
+    : (payload as { voices?: unknown })?.voices;
+  if (!Array.isArray(list)) return [];
+
+  return list.flatMap((entry): TTSVoice[] => {
+    if (typeof entry === "string") return [{ id: entry, name: entry }];
+    if (typeof entry !== "object" || entry === null) return [];
+    const { id, name } = entry as { id?: unknown; name?: unknown };
+    if (typeof id !== "string") return [];
+    return [{ id, name: typeof name === "string" ? name : id }];
+  });
+}
 
 export class OpenAICompatibleTTSProvider implements TTSProvider {
   private readonly baseUrl: string;
@@ -13,33 +34,31 @@ export class OpenAICompatibleTTSProvider implements TTSProvider {
   private readonly defaultVoice: string;
   private readonly format: TTSAudioFormat;
 
-  /** MIME type of the bytes `synthesize` returns, for the response header. */
   readonly contentType: string;
 
   constructor(
     baseUrl: string,
     model: string,
     defaultVoice: string,
-    format: TTSAudioFormat = 'wav',
+    format: TTSAudioFormat = "wav",
   ) {
-    this.baseUrl = baseUrl.replace(/\/+$/, '');
+    this.baseUrl = baseUrl.replace(/\/+$/, "");
     this.model = model;
     this.defaultVoice = defaultVoice;
     this.format = format;
     this.contentType = CONTENT_TYPES[format];
   }
 
-  async synthesize(text: string, voice?: string): Promise<ArrayBuffer> {
+  async synthesize(text: string, options: TTSOptions = {}): Promise<ArrayBuffer> {
     const response = await fetch(`${this.baseUrl}/audio/speech`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         model: this.model,
         input: text,
-        voice: voice || this.defaultVoice,
+        voice: options.voice || this.defaultVoice,
         response_format: this.format,
+        ...(options.speed === undefined ? {} : { speed: options.speed }),
       }),
     });
 
@@ -49,10 +68,10 @@ export class OpenAICompatibleTTSProvider implements TTSProvider {
       );
     }
 
-    return await response.arrayBuffer();
+    return response.arrayBuffer();
   }
 
-  async listVoices(): Promise<string[]> {
+  async listVoices(): Promise<TTSVoice[]> {
     const response = await fetch(`${this.baseUrl}/audio/voices`);
 
     if (!response.ok) {
@@ -61,13 +80,6 @@ export class OpenAICompatibleTTSProvider implements TTSProvider {
       );
     }
 
-    const data: unknown = await response.json();
-    const voices = (data as { voices?: unknown })?.voices;
-
-    if (!Array.isArray(voices)) {
-      throw new Error('Unexpected voices response shape');
-    }
-
-    return voices.filter((v): v is string => typeof v === 'string');
+    return readVoices(await response.json());
   }
 }

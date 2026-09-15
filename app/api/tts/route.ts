@@ -12,7 +12,7 @@ function requireEnv(name: string): string {
 
 let provider: TTSProvider | null = null;
 
-function getProvider(): TTSProvider {
+export function getProvider(): TTSProvider {
   if (!provider) {
     provider = new OpenAICompatibleTTSProvider(
       requireEnv('TTS_BASE_URL'),
@@ -32,20 +32,34 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
 
-  const { text, voice } = payload as { text?: unknown; voice?: unknown };
+  const { text, voice, speed } = payload as {
+    text?: unknown;
+    voice?: unknown;
+    speed?: unknown;
+  };
 
-  if (typeof text !== 'string' || text.trim() === '') {
-    return NextResponse.json({ error: 'Text is required' }, { status: 400 });
+  if (typeof text !== "string" || text.trim() === "") {
+    return NextResponse.json({ error: "Text is required" }, { status: 400 });
   }
 
-  if (voice !== undefined && typeof voice !== 'string') {
-    return NextResponse.json({ error: 'Voice must be a string' }, { status: 400 });
+  if (voice !== undefined && typeof voice !== "string") {
+    return NextResponse.json({ error: "Voice must be a string" }, { status: 400 });
+  }
+
+  if (
+    speed !== undefined &&
+    (typeof speed !== "number" || !Number.isFinite(speed) || speed < 0.5 || speed > 2)
+  ) {
+    return NextResponse.json(
+      { error: "Speed must be between 0.5 and 2" },
+      { status: 400 },
+    );
   }
 
   const tts = getProvider();
-  
+
   try {
-    const audio = await tts.synthesize(text, voice);
+    const audio = await tts.synthesize(text, { voice, speed });
 
     return new NextResponse(audio, {
       headers: {
