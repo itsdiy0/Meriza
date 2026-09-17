@@ -356,3 +356,24 @@ end of Phase 2 are why it needs to stay current: both described an
 `AmplitudeSource` abstraction and a score-as-filler design that had already
 been reversed, and an agent reading them would have rebuilt exactly the thing
 that did not work.
+
+**The palette is transformed, never replaced.** `ORB_STATES` is tuned as a
+set: cool teal at rest, violet while thinking, warm amber while speaking. That
+progression is how a state change reads at a glance, without anyone learning
+what the colours mean. So theme control is hue rotation, a saturation
+multiplier, and a lightness offset, all applied identically to every state.
+
+Per-state colour pickers were the obvious alternative and were rejected: they
+let all four states be set to the same blue, which silently removes the signal.
+Preserving the relationships matters more than absolute control.
+
+The operations differ because the properties do. Saturation multiplies, so 0 is
+a genuinely grey orb and 1 leaves the presets untouched; offsetting would push
+every state toward the same saturation and flatten the contrast. Lightness
+offsets, because multiplying a value already near zero barely moves it while a
+bright one blows out. Hue wraps, being circular.
+
+Note the colour helpers reuse module-level scratch objects, because
+`Color.getHSL` writes into a target you pass rather than allocating, and these
+run in the render loop. The returned colour is therefore shared: read it before
+calling again, or clone it.
