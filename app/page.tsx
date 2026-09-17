@@ -222,7 +222,7 @@ export default function Home() {
             : "left-0 right-0"
         }`}
       >
-        <Orb state={orbState} onFrame={onFrame} />
+        <Orb state={orbState} hueShift={prefs.hueShift} onFrame={onFrame} />
       </div>
 
       <div className="pointer-events-none absolute inset-x-0 top-0 z-30 flex justify-end p-4">

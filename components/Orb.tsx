@@ -6,6 +6,7 @@ import { fragmentShader, vertexShader } from "@/lib/orb/shaders";
 import { ORB_STATES, type OrbStatePreset } from "@/lib/orb/states";
 import type { MotionFrame } from "@/lib/orb/motion/types";
 import type { OrbState } from "@/lib/types";
+import { shiftHue, shiftHueCss } from "@/lib/orb/palette";
 
 interface OrbProps {
   state: OrbState;
@@ -14,6 +15,8 @@ interface OrbProps {
    * overrides amplitude and wobble and can fire a ripple; null falls back to
    * the active state preset. Lets a motion source play in the orb's own loop.
    */
+  /** Rotates the whole palette in degrees, 0 leaves the presets alone. */
+  hueShift?: number;
   onFrame?: (elapsedSeconds: number) => MotionFrame | null;
   /** Fires on a tap or click that lands on the orb surface. */
   onTap?: () => void;
@@ -27,15 +30,22 @@ const clamp = (min: number, max: number, value: number) =>
 const lerp = (a: number, b: number, n: number) => a + (b - a) * n;
 const mapWobble = (w: number) => WOBBLE_MIN + (WOBBLE_MAX - WOBBLE_MIN) * w;
 
-export default function Orb({ state, onFrame, onTap }: OrbProps) {
+export default function Orb({ state, hueShift = 0, onFrame, onTap }: OrbProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const haloRef = useRef<HTMLDivElement>(null);
 
   // Mutable values the render loop reads without re-running the setup effect.
   const targetRef = useRef<OrbStatePreset>(ORB_STATES[state]);
+  const hueRef = useRef(hueShift);
+  const glowRef = useRef(ORB_STATES[state].glow);
   const onFrameRef = useRef(onFrame);
   const onTapRef = useRef(onTap);
+  
+  useEffect(() => {
+    hueRef.current = hueShift;
+    glowRef.current = shiftHueCss(ORB_STATES[state].glow, hueShift);
+  }, [state, hueShift]);
 
   useEffect(() => {
     targetRef.current = ORB_STATES[state];
@@ -265,12 +275,13 @@ export default function Orb({ state, onFrame, onTap }: OrbProps) {
         target.wSpeed,
         s,
       );
+      const hue = hueRef.current;
       (uniforms.uColorA.value as THREE.Color).lerp(
-        new THREE.Color(target.colorA),
+        shiftHue(target.colorA, hue),
         s,
       );
       (uniforms.uColorB.value as THREE.Color).lerp(
-        new THREE.Color(target.colorB),
+        shiftHue(target.colorB, hue),
         s,
       );
       autoRot = target.rot * motion;
@@ -292,7 +303,7 @@ export default function Orb({ state, onFrame, onTap }: OrbProps) {
 
       if (halo) {
         const pct = Math.round(8 + uniforms.uEnergy.value * 22);
-        halo.style.background = `radial-gradient(60% 60% at 50% 46%, color-mix(in srgb, ${target.glow} ${pct}%, transparent) 0%, transparent 60%)`;
+        halo.style.background = `radial-gradient(60% 60% at 50% 46%, color-mix(in srgb, ${glowRef.current} ${pct}%, transparent) 0%, transparent 60%)`;
       }
 
       renderer.render(scene, camera);

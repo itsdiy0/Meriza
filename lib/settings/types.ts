@@ -18,6 +18,11 @@ export interface Settings {
   speed: number;
   /** Overrides the orb palette, keeping the per-state structure. */
   hueShift: number;
+
+  /** Multiplies preset saturation, 0 greyscale to 2 vivid. */
+  saturation: number;
+  /** Shifts preset lightness, -0.2 dimmer to 0.2 brighter. */
+  lightness: number;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -25,4 +30,7 @@ export const DEFAULT_SETTINGS: Settings = {
   voice: null,
   speed: 1,
   hueShift: 0,
+  saturation: 1,
+  lightness: 0,
 };
+
