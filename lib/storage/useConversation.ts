@@ -6,21 +6,28 @@ import {
   useRef,
   useState,
   type Dispatch,
-  type SetStateAction,
   type MutableRefObject,
+  type SetStateAction,
 } from "react";
 import {
   createConversation,
+  deleteConversation,
   deleteMessage,
   listConversations,
   readMessages,
+  renameConversation,
   writeMessage,
 } from "@/lib/storage/conversations";
+import type { Conversation } from "@/lib/storage/types";
 import type { Message } from "@/lib/types";
+
+const TITLE_CHARS = 48;
 
 export interface ConversationHandle {
   /** Null until the store has been read, so the first paint can wait. */
   id: string | null;
+  /** Newest first. Refreshed on demand rather than on every write. */
+  conversations: Conversation[];
   messages: Message[];
   setMessages: Dispatch<SetStateAction<Message[]>>;
   /** Exposed so a caller can sync it before saving within the same tick. */
@@ -33,6 +40,18 @@ export interface ConversationHandle {
   save: (message: Message) => void;
   /** Removes a message that was never spoken. */
   discard: (id: string) => void;
+  refresh: () => Promise<void>;
+  open: (id: string) => Promise<void>;
+  create: () => Promise<void>;
+  remove: (id: string) => Promise<void>;
+}
+
+/** Stands in until a generated title replaces it. */
+function provisionalTitle(content: string): string {
+  const flat = content.replace(/\s+/g, " ").trim();
+  return flat.length <= TITLE_CHARS
+    ? flat
+    : `${flat.slice(0, TITLE_CHARS).trimEnd()}...`;
 }
 
 /**
@@ -48,6 +67,7 @@ export interface ConversationHandle {
  */
 export function useConversation(): ConversationHandle {
   const [id, setId] = useState<string | null>(null);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
 
   // Mirrors state so `save` can read the current conversation without being
@@ -56,15 +76,29 @@ export function useConversation(): ConversationHandle {
   const messagesRef = useRef<Message[]>(messages);
   messagesRef.current = messages;
 
+  const refresh = useCallback(async () => {
+    try {
+      setConversations(await listConversations());
+    } catch (error) {
+      console.error("Could not list conversations:", error);
+    }
+  }, []);
+
   useEffect(() => {
     let live = true;
 
     const restore = async () => {
       try {
-        const [recent] = await listConversations();
+        const all = await listConversations();
+        if (!live) return;
+        setConversations(all);
+
+        const [recent] = all;
         if (recent === undefined) {
           const fresh = await createConversation(crypto.randomUUID());
-          if (live) setId(fresh.id);
+          if (!live) return;
+          setConversations([fresh]);
+          setId(fresh.id);
           return;
         }
 
@@ -103,9 +137,16 @@ export function useConversation(): ConversationHandle {
         (m) => m.id === message.id,
       );
       if (position === -1) return;
+
       void writeMessage(id, message, position).catch((error) => {
         console.error("Could not save a message:", error);
       });
+
+      // The opening message labels the conversation until something better
+      // is generated for it.
+      if (position === 0 && message.role === "user") {
+        void renameConversation(id, provisionalTitle(message.content));
+      }
     },
     [id],
   );
@@ -116,5 +157,73 @@ export function useConversation(): ConversationHandle {
     });
   }, []);
 
-  return { id, messages, setMessages, save, discard, messagesRef };
+  const open = useCallback(
+    async (next: string) => {
+      if (next === id) return;
+      try {
+        const stored = await readMessages(next);
+        const restored = stored.map(({ id: messageId, role, content }) => ({
+          id: messageId,
+          role,
+          content,
+        }));
+        messagesRef.current = restored;
+        setMessages(restored);
+        setId(next);
+      } catch (error) {
+        console.error("Could not open the conversation:", error);
+      }
+    },
+    [id],
+  );
+
+  const create = useCallback(async () => {
+    try {
+      const fresh = await createConversation(crypto.randomUUID());
+      messagesRef.current = [];
+      setMessages([]);
+      setId(fresh.id);
+      setConversations((prev) => [fresh, ...prev]);
+    } catch (error) {
+      console.error("Could not start a conversation:", error);
+    }
+  }, []);
+
+  const remove = useCallback(
+    async (target: string) => {
+      try {
+        await deleteConversation(target);
+        const all = await listConversations();
+        setConversations(all);
+
+        if (target !== id) return;
+
+        // Deleting the one being read leaves nothing open, so fall through to
+        // the next most recent, or to a fresh one if that was the last.
+        const [recent] = all;
+        if (recent === undefined) {
+          await create();
+          return;
+        }
+        await open(recent.id);
+      } catch (error) {
+        console.error("Could not delete the conversation:", error);
+      }
+    },
+    [create, id, open],
+  );
+
+  return {
+    id,
+    conversations,
+    messages,
+    setMessages,
+    messagesRef,
+    save,
+    discard,
+    refresh,
+    open,
+    create,
+    remove,
+  };
 }
