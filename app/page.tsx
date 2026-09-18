@@ -10,6 +10,7 @@ import { createSpeechPlayer, type SpeechPlayer } from "@/lib/audio/speech";
 import { createMotionMixer, type MotionMixer } from "@/lib/orb/motion/mixer";
 import { createWaitingSource } from "@/lib/orb/motion/waiting";
 import { useSettings } from "@/lib/settings/useSettings";
+import { useConversation } from "@/lib/storage/useConversation";
 import { createRevealer, type Revealer } from "@/lib/transcript/reveal";
 import type { ChatStreamChunk, Message, OrbState } from "@/lib/types";
 
@@ -19,7 +20,6 @@ const isAbort = (error: unknown) =>
   error instanceof DOMException && error.name === "AbortError";
 
 export default function Home() {
-  const [messages, setMessages] = useState<Message[]>([]);
   const [orbState, setOrbState] = useState<OrbState>("idle");
   const [error, setError] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
@@ -27,8 +27,22 @@ export default function Home() {
   const [revealed, setRevealed] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
+  const {
+    id: conversationId,
+    messages,
+    setMessages,
+    save,
+    discard,
+    messagesRef,
+  } = useConversation();
+
   const settings = useSettings();
   const { settings: prefs, set: setPref } = settings;
+
+  // Read at call time rather than closed over, so changing a setting does not
+  // rebuild send and the change does not land a turn late.
+  const prefsRef = useRef(prefs);
+  prefsRef.current = prefs;
 
   const mixerRef = useRef<MotionMixer | null>(null);
   if (mixerRef.current === null) mixerRef.current = createMotionMixer();
@@ -37,24 +51,35 @@ export default function Home() {
   const playerRef = useRef<SpeechPlayer | null>(null);
   if (playerRef.current === null) playerRef.current = createSpeechPlayer();
   const player = playerRef.current;
-  const prefsRef = useRef(prefs);
-  prefsRef.current = prefs;
-  
+
   const abortRef = useRef<AbortController | null>(null);
   const replyIdRef = useRef<string | null>(null);
 
-  const writeReply = useCallback((content: string, visible: number) => {
-    setRevealed(visible);
-    const id = replyIdRef.current;
-    if (id === null) return;
-    setMessages((prev) =>
-      prev.map((m) => (m.id === id ? { ...m, content } : m)),
-    );
-  }, []);
+  const writeReply = useCallback(
+    (content: string, visible: number) => {
+      setRevealed(visible);
+      const id = replyIdRef.current;
+      if (id === null) return;
+      setMessages((prev) =>
+        prev.map((m) => (m.id === id ? { ...m, content } : m)),
+      );
+      console.info("[save]", id, content.length);
+      save({ id, role: "assistant", content });
+    },
+    [save, setMessages],
+  );
+
+  // The revealer is constructed once, so it must not close over a callback
+  // that changes. This indirection keeps it pointed at the current one, which
+  // matters because the first render has no conversation id yet.
+  const writeRef = useRef(writeReply);
+  writeRef.current = writeReply;
 
   const revealerRef = useRef<Revealer | null>(null);
   if (revealerRef.current === null) {
-    revealerRef.current = createRevealer(writeReply);
+    revealerRef.current = createRevealer((content, visible) =>
+      writeRef.current(content, visible),
+    );
   }
   const revealer = revealerRef.current;
 
@@ -76,16 +101,18 @@ export default function Home() {
 
     const id = replyIdRef.current;
     if (id !== null) {
-      setMessages((prev) =>
-        prev.filter((m) => m.id !== id || m.content !== ""),
-      );
+      setMessages((prev) => {
+        const kept = prev.filter((m) => m.id !== id || m.content !== "");
+        if (kept.length !== prev.length) discard(id);
+        return kept;
+      });
     }
 
     mixer.clear();
     setOrbState("idle");
     setGenerating(false);
     setSpeaking(false);
-  }, [mixer, player, revealer]);
+  }, [discard, mixer, player, revealer, setMessages]);
 
   const send = useCallback(
     async (text: string) => {
@@ -101,7 +128,16 @@ export default function Home() {
       revealer.reset();
 
       setError(null);
-      setMessages([...history, { id: replyId, role: "assistant", content: "" }]);
+      // Synced before saving because React has not committed the state update
+      // yet, and the message's position in the conversation is what orders it
+      // in the store.
+      const opened: Message[] = [
+        ...history,
+        { id: replyId, role: "assistant", content: "" },
+      ];
+      messagesRef.current = opened;
+      setMessages(opened);
+      save(userMessage);
       setOrbState("thinking");
       setGenerating(true);
       setSpeaking(true);
@@ -194,7 +230,7 @@ export default function Home() {
         stop();
       }
     },
-    [messages, mixer, player, revealer, stop],
+    [messages, mixer, player, revealer, save, setMessages, stop],
   );
 
   useEffect(() => {
@@ -222,7 +258,11 @@ export default function Home() {
             : "left-0 right-0"
         }`}
       >
-        <Orb state={orbState} hueShift={prefs.hueShift} onFrame={onFrame} />
+        <Orb
+          state={orbState}
+          hueShift={prefs.hueShift}
+          onFrame={onFrame}
+        />
       </div>
 
       <div className="pointer-events-none absolute inset-x-0 top-0 z-30 flex justify-end p-4">
@@ -233,7 +273,7 @@ export default function Home() {
       </div>
 
       <div className="pointer-events-none absolute inset-0 flex flex-col">
-      <div className="relative flex flex-1 overflow-hidden">
+        <div className="relative flex flex-1 overflow-hidden">
           <div
             className={`absolute inset-y-0 transition-[left,right] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none ${
               split
@@ -257,6 +297,7 @@ export default function Home() {
             onStop={stop}
             onSettings={() => setSettingsOpen(true)}
             active={generating || speaking}
+            disabled={conversationId === null}
           />
         </div>
       </div>
