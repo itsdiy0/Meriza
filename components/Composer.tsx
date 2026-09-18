@@ -9,12 +9,14 @@ interface ComposerProps {
   onSettings: () => void;
   /** True while Meriza is generating or speaking. */
   active: boolean;
+  disabled:boolean;
 }
 
 export default function Composer({
   onSend,
   onStop,
   onSettings,
+  disabled,
   active,
 }: ComposerProps) {
   const [value, setValue] = useState("");

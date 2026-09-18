@@ -71,7 +71,10 @@ export default function Transcript({
   revealedWords,
 }: TranscriptProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const [expanded, setExpanded] = useState(false);
+  // A restored conversation is something being looked back at rather than a
+  // live exchange, so it opens with its history visible. Focus mode takes over
+  // from the next turn.
+  const [expanded, setExpanded] = useState(messages.length > 1);
   const [scrolled, setScrolled] = useState(false);
   // Held past their removal so they can fade. Rendered out of flow, so a stuck
   // exit can never displace the exchange that replaced them.
