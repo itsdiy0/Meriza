@@ -13,6 +13,8 @@ import { useSettings } from "@/lib/settings/useSettings";
 import { useConversation } from "@/lib/storage/useConversation";
 import { createRevealer, type Revealer } from "@/lib/transcript/reveal";
 import type { ChatStreamChunk, Message, OrbState } from "@/lib/types";
+import Conversations from "@/components/Conversations";
+import { ChatsCircle } from "@phosphor-icons/react";
 
 const newId = () => crypto.randomUUID();
 
@@ -26,14 +28,20 @@ export default function Home() {
   const [speaking, setSpeaking] = useState(false);
   const [revealed, setRevealed] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [listOpen, setListOpen] = useState(false);
 
   const {
     id: conversationId,
+    conversations,
     messages,
     setMessages,
+    messagesRef,
     save,
     discard,
-    messagesRef,
+    refresh,
+    open,
+    create,
+    remove,
   } = useConversation();
 
   const settings = useSettings();
@@ -113,6 +121,28 @@ export default function Home() {
     setGenerating(false);
     setSpeaking(false);
   }, [discard, mixer, player, revealer, setMessages]);
+
+    /**
+   * Changing conversation ends the current turn, since a reply belongs to the
+   * conversation it was generated in and would otherwise keep writing into
+   * the one being left.
+   */
+    const switchTo = useCallback(
+      (next: string) => {
+        stop();
+        replyIdRef.current = null;
+        revealer.reset();
+        void open(next);
+      },
+      [open, revealer, stop],
+    );
+  
+    const startNew = useCallback(() => {
+      stop();
+      replyIdRef.current = null;
+      revealer.reset();
+      void create();
+    }, [create, revealer, stop]);
 
   const send = useCallback(
     async (text: string) => {
@@ -265,7 +295,19 @@ export default function Home() {
         />
       </div>
 
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-30 flex justify-end p-4">
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-30 flex justify-between p-4">
+        <button
+          type="button"
+          onClick={() => {
+            void refresh();
+            setListOpen(true);
+          }}
+          aria-label="Conversations"
+          className="pointer-events-auto rounded-full border border-[var(--line)] bg-[color-mix(in_srgb,var(--ink-2)_60%,transparent)] p-2 text-[var(--muted)] opacity-40 backdrop-blur-md transition-opacity duration-300 hover:text-[var(--text)] hover:opacity-100 focus-visible:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--glow)]"
+        >
+          <ChatsCircle size={14} weight="light" />
+        </button>
+
         <ViewToggle
           value={prefs.view}
           onChange={(view) => setPref("view", view)}
@@ -306,6 +348,15 @@ export default function Home() {
         {...settings}
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
+      />
+        <Conversations
+        open={listOpen}
+        onClose={() => setListOpen(false)}
+        conversations={conversations}
+        currentId={conversationId}
+        onOpen={switchTo}
+        onCreate={startNew}
+        onDelete={remove}
       />
     </main>
   );
