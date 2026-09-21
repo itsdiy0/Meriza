@@ -42,6 +42,7 @@ export default function Home() {
     open,
     create,
     remove,
+    title
   } = useConversation();
 
   const settings = useSettings();
@@ -187,6 +188,18 @@ export default function Home() {
             mixer.clear();
             setOrbState("idle");
             setSpeaking(false);
+
+            // Named from the opening exchange, once it has actually been
+            // spoken rather than merely generated.
+            const [first, second] = messagesRef.current;
+            if (
+              second !== undefined &&
+              first?.role === "user" &&
+              second.role === "assistant" &&
+              second.content !== ""
+            ) {
+              title(first.content, second.content);
+            }
           },
           onError: () => {
             setError("Voice playback failed");

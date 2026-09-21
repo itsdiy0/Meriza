@@ -9,4 +9,7 @@ export type ProviderMessage = Pick<Message, "role" | "content">;
  */
 export interface LlmProvider {
   stream(messages: ProviderMessage[]): AsyncIterable<string>;
+    /** One-shot completion, for short internal tasks like naming a
+   *  conversation. Not part of the conversation itself. */
+  complete(prompt: string, maxTokens: number): Promise<string>;
 }

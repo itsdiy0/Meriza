@@ -44,6 +44,8 @@ export interface ConversationHandle {
   open: (id: string) => Promise<void>;
   create: () => Promise<void>;
   remove: (id: string) => Promise<void>;
+  /** Names the conversation from its opening exchange, once. */
+  title: (user: string, assistant: string) => void;
 }
 
 /** Stands in until a generated title replaces it. */
@@ -113,6 +115,7 @@ export function useConversation(): ConversationHandle {
           })),
         );
         setId(recent.id);
+        if (recent.title !== null) titled.current.add(recent.id);
       } catch (error) {
         // An unavailable database, private browsing or a blocked upgrade,
         // should cost persistence and nothing else.
@@ -157,6 +160,36 @@ export function useConversation(): ConversationHandle {
     });
   }, []);
 
+  // Conversations already named are skipped, so an interrupted reply that
+  // comes back later does not rename one mid-session.
+  const titled = useRef(new Set<string>());
+
+  const title = useCallback(
+    (user: string, assistant: string) => {
+      if (id === null || titled.current.has(id)) return;
+      titled.current.add(id);
+      const target = id;
+
+      void fetch("/api/title", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user, assistant }),
+      })
+        .then((res) => (res.ok ? res.json() : Promise.reject()))
+        .then(async ({ title: named }: { title: string }) => {
+          await renameConversation(target, named);
+          setConversations((prev) =>
+            prev.map((c) => (c.id === target ? { ...c, title: named } : c)),
+          );
+        })
+        .catch(() => {
+          // The truncated first message is already in place, and a clumsy
+          // title beats none.
+        });
+    },
+    [id],
+  );
+
   const open = useCallback(
     async (next: string) => {
       if (next === id) return;
@@ -170,6 +203,10 @@ export function useConversation(): ConversationHandle {
         messagesRef.current = restored;
         setMessages(restored);
         setId(next);
+        const existing = conversations.find((c) => c.id === next);
+        if (existing?.title !== null && existing !== undefined) {
+          titled.current.add(next);
+        }
       } catch (error) {
         console.error("Could not open the conversation:", error);
       }
@@ -225,5 +262,6 @@ export function useConversation(): ConversationHandle {
     open,
     create,
     remove,
+    title
   };
 }
