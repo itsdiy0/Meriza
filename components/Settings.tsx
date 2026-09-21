@@ -11,6 +11,8 @@ import type { OrbState } from "@/lib/types";
 interface SettingsProps extends SettingsHandle {
   open: boolean;
   onClose: () => void;
+  /** True while a reply is being spoken. */
+  speaking?: boolean;
 }
 
 type Tab = "voice" | "theme";
@@ -107,6 +109,7 @@ export default function Settings({
   onClose,
   settings,
   set,
+  speaking = false,
 }: SettingsProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const [tab, setTab] = useState<Tab>("voice");
@@ -256,13 +259,16 @@ export default function Settings({
                   max={2}
                   step={0.05}
                   value={settings.speed}
+                  disabled={speaking}
                   onChange={(e) => set("speed", Number(e.target.value))}
-                  className="accent-[var(--text)]"
+                  className="accent-[var(--text)] disabled:opacity-30"
                 />
               </Field>
 
               <p className="text-[13px] text-[var(--muted)]">
-                Changes apply from your next message, not the one being spoken.
+                {speaking
+                  ? "Locked while Meriza is speaking. Changes apply from your next message."
+                  : "Changes apply from your next message, not the one being spoken."}
               </p>
             </div>
           ) : (

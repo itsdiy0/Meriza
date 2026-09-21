@@ -361,7 +361,9 @@ export default function Home() {
         {...settings}
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
+        speaking={speaking}
       />
+      
         <Conversations
         open={listOpen}
         onClose={() => setListOpen(false)}
