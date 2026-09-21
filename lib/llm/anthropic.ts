@@ -32,5 +32,19 @@ export function createAnthropicProvider(): LlmProvider {
         }
       }
     },
+    async complete(prompt: string, maxTokens: number): Promise<string> {
+      // No system prompt: Meriza's voice is for talking to someone, and a
+      // title is a label rather than something she says.
+      const reply = await client.messages.create({
+        model,
+        max_tokens: maxTokens,
+        messages: [{ role: "user", content: prompt }],
+      });
+
+      return reply.content
+        .map((block) => (block.type === "text" ? block.text : ""))
+        .join("")
+        .trim();
+    },
   };
 }
