@@ -361,6 +361,7 @@ export default function Home() {
         {...settings}
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
+        onCleared={startNew}
         speaking={speaking}
       />
       
