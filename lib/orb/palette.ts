@@ -37,6 +37,25 @@ export const NO_SHIFT: PaletteShift = { hue: 0, saturation: 1, lightness: 0 };
  * other. Saturation multiplies rather than offsets, so a grey orb and a vivid
  * one both keep the cool-to-warm progression that makes a state legible.
  */
+/** The same transform for a CSS hex string, for the halo and for previews. */
+export function shiftColorCss(css: string, shift: PaletteShift): string {
+  const color = new THREE.Color(css);
+  color.getHSL(hsl);
+  color.setHSL(
+    (hsl.h + shift.hue / 360) % 1,
+    Math.min(1, hsl.s * shift.saturation),
+    Math.min(1, Math.max(0, hsl.l + shift.lightness)),
+  );
+  return `#${color.getHexString()}`;
+}
+
+/**
+ * Adjusts a preset colour, preserving how the four states relate to each
+ * other. Saturation multiplies rather than offsets, so a grey orb and a vivid
+ * one both keep the cool-to-warm progression that makes a state legible.
+ *
+ * Returns a shared instance, so read the result before calling again.
+ */
 export function shiftColor(hex: number, shift: PaletteShift): THREE.Color {
   scratch.setHex(hex).getHSL(hsl);
   return scratch.setHSL(
