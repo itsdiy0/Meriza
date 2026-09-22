@@ -334,6 +334,103 @@ the same treatment rather than inheriting it.
 a segmented control in the corner, because it is switched often enough that a
 modal round trip is tedious. Settings holds what is set once and left.
 
+## Storage
+
+**IndexedDB, not localStorage.** Settings live in localStorage and that is
+fine, but a conversation log is different: localStorage is synchronous, so
+every read blocks the main thread while the orb renders; it caps around 5MB,
+which a few dozen conversations fill; and it stores strings only, so every
+write is a JSON round trip. IndexedDB is async, has quota in the hundreds of
+megabytes, stores structured values, and can index.
+
+`idb` is the one dependency taken here. About 1KB to promisify an API that is
+otherwise event-based and unpleasant enough that everyone wraps it.
+
+**Messages are stored separately from conversations, not nested.** The
+assistant message is appended to repeatedly while a reply reveals, and
+rewriting a whole conversation record on every update is the difference
+between smooth and not. An index on `conversationId` means opening one does
+not scan every message in the database.
+
+**State is the source of truth and the store is a mirror.** Reading back from
+IndexedDB was never an option: the assistant message is rewritten several times
+a second while a reply is revealed. Writes are fire and forget, since a failed
+one costs the durable copy of one message and blocking the reveal on a database
+round trip would cost more.
+
+**Write cadence is the user message immediately and the assistant message on
+each chunk event.** A handful of writes per reply rather than hundreds for
+every revealed word, and nothing lost if the tab closes mid-reply. What is
+stored is what was said, consistent with the transcript: an interrupted reply
+persists the spoken portion and an unspoken one is deleted.
+
+**Message position comes from the conversation, not a counter.** The first
+implementation handed out incrementing indices and kept them in a map. Deleting
+an unspoken reply removed its map entry without giving the position back, so
+every discarded reply shifted everything after it, and replies started
+appearing under the wrong prompt. Position is now the index in `messages`,
+which has nothing to get out of step: a re-write always lands in the same
+place, and a restored conversation needs no bookkeeping at all.
+
+Note `save` is called from `send` before React has committed, so the mirror ref
+is synced explicitly with the array being set.
+
+**The upgrade path wipes rather than migrates.** Bumping the store version
+discards everything, deliberately: this is a conversation log, not records
+anyone has invested in, and per-shape migrations are a maintenance cost with no
+matching value. Export exists to make that survivable, and is the only copy
+that outlives clearing site data or moving machines.
+
+**Erase leaves settings alone.** `clearAll` touches only IndexedDB. Conflating
+a conversation wipe with losing a chosen voice would be a bad surprise.
+
+**Three bugs, all the same shape.** A long-lived object holding stale state,
+which is worth naming because it has now happened four times across the
+project:
+
+- The revealer is constructed once and captured the first `writeReply`, from a
+  render where the conversation id was still null. Its `save` returned early
+  forever, so no assistant message was ever written, while user messages worked
+  because `send` calls `save` directly.
+- Voice and pace were closed over in `send`, whose dependency array did not
+  include them, so a change landed a turn late.
+- The transcript's exit timer depended on a derived array, so its cleanup
+  cancelled it every render and outgoing messages never unmounted.
+
+The pattern: anything created once and given a callback needs a ref
+indirection, and anything with a timer needs a dependency array that only
+contains stable values.
+
+**A restored conversation opens with its history visible.** Nothing is
+generating, so there is no current exchange, only history. Focus mode takes
+over from the next turn.
+
+**Conversation switching is an overlay, not a sidebar.** Scrolling is
+continuous and switching is discrete selection, so folding it into the existing
+spiral gesture was considered and rejected: it would mean scrolling past fifty
+messages to reach the previous conversation, and would still need names, dates
+and delete. Permanent chrome would also compete with the orb for a whole
+session to serve a moment.
+
+Switching or starting a conversation ends the current turn first, since a reply
+belongs to the conversation it was generated in and would otherwise keep
+writing into the one being left.
+
+**Titles are generated, with the truncated first message as a fallback.** A
+list of rows reading "New conversation" is unusable, and "Persian Poets" beats
+"most famous persian poeterys". The call runs without Meriza's system prompt: a
+title is a label, not something she says, and her voice would produce "Well,
+that one was about Persian poets."
+
+Named after the reply is spoken rather than generated, consistent with the
+rest of the app. Models add quotes and trailing punctuation regardless of
+instruction, so the route strips both and rejects anything over 70 characters
+rather than putting a sentence in the sidebar.
+
+This is the first thing Meriza does with a model that is not part of the
+conversation, which is why `LlmProvider` gained `complete`. There will be more
+of them.
+
 ## Process
 
 **No em dashes.** Anywhere, prose or code.
