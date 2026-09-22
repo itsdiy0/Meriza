@@ -29,7 +29,7 @@ export default function Home() {
   const [revealed, setRevealed] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [listOpen, setListOpen] = useState(false);
-
+  const [listening, setListening] = useState(false);
   const {
     id: conversationId,
     conversations,
@@ -44,6 +44,14 @@ export default function Home() {
     remove,
     title
   } = useConversation();
+
+  const onListening = useCallback(
+    (open: boolean) => {
+      setListening(open);
+      setOrbState(open ? "listening" : "idle");
+    },
+    [],
+  );
 
   const settings = useSettings();
   const { settings: prefs, set: setPref } = settings;
@@ -276,6 +284,7 @@ export default function Home() {
     [messages, mixer, player, revealer, save, setMessages, stop],
   );
 
+  
   useEffect(() => {
     return () => {
       player.dispose();
@@ -353,6 +362,7 @@ export default function Home() {
             onSettings={() => setSettingsOpen(true)}
             active={generating || speaking}
             disabled={conversationId === null}
+            onListening={onListening}
           />
         </div>
       </div>
