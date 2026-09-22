@@ -1,14 +1,10 @@
 "use client";
 
 import { useCallback, useRef, useState, type FormEvent } from "react";
-import {
-  Gear,
-  Microphone,
-  PaperPlaneRight,
-  Stop,
-} from "@phosphor-icons/react";
+import { Gear, Microphone, PaperPlaneRight, Stop } from "@phosphor-icons/react";
 import { startRecording, type Recorder } from "@/lib/audio/record";
 import { transcribe } from "@/lib/stt/transcribe";
+import Waveform from "@/components/Waveform";
 
 interface ComposerProps {
   onSend: (text: string) => void;
@@ -20,9 +16,6 @@ interface ComposerProps {
   active: boolean;
   disabled?: boolean;
 }
-
-/** Below this, a press was a misclick rather than an utterance. */
-const MIN_MS = 350;
 
 export default function Composer({
   onSend,
@@ -36,11 +29,9 @@ export default function Composer({
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [denied, setDenied] = useState(false);
-  
-  const [latched, setLatched] = useState(false);
+  const [level, setLevel] = useState<(() => number) | null>(null);
 
   const recorderRef = useRef<Recorder | null>(null);
-  const startedRef = useRef(0);
 
   const empty = value.trim() === "";
 
@@ -54,16 +45,18 @@ export default function Composer({
   const beginRecording = useCallback(async () => {
     if (recorderRef.current !== null || disabled) return;
 
-    // Holding the mic interrupts, since you are plainly addressing her rather
-    // than listening. This is barge-in, solved by a button.
+    // Speaking interrupts, since you are plainly addressing her rather than
+    // listening. This is barge-in, solved by a button.
     onStop();
 
     try {
       const recorder = await startRecording();
       recorderRef.current = recorder;
-      startedRef.current = performance.now();
       setDenied(false);
       setRecording(true);
+      // Wrapped, since useState treats a bare function as a lazy initialiser
+      // and would call it rather than store it.
+      setLevel(() => recorder.level);
       onListening(true);
     } catch {
       setDenied(true);
@@ -74,14 +67,10 @@ export default function Composer({
     const recorder = recorderRef.current;
     if (recorder === null) return;
     recorderRef.current = null;
-    setRecording(false);
-    onListening(false);
 
-    // A tap rather than a hold. Nothing was said, so nothing is sent.
-    if (performance.now() - startedRef.current < MIN_MS) {
-      recorder.cancel();
-      return;
-    }
+    setRecording(false);
+    setLevel(null);
+    onListening(false);
 
     const audio = await recorder.stop();
     if (audio === null) return;
@@ -92,18 +81,26 @@ export default function Composer({
       // Silence and noise come back empty, and sending nothing is worse than
       // doing nothing.
       if (text !== "") onSend(text);
-    } catch {
-      setDenied(false);
+    } catch (error) {
+      console.error("Could not transcribe:", error);
     } finally {
       setTranscribing(false);
     }
   }, [onListening, onSend]);
 
+  const onMicClick = () => {
+    if (recorderRef.current !== null) {
+      void endRecording();
+      return;
+    }
+    void beginRecording();
+  };
+
   const micLabel = denied
     ? "Microphone access was denied"
     : recording
-      ? "Release to send"
-      : "Hold to speak";
+      ? "Stop and send"
+      : "Speak";
 
   return (
     <form
@@ -122,12 +119,7 @@ export default function Composer({
       <button
         type="button"
         disabled={disabled || transcribing}
-        onPointerDown={(e) => {
-          e.currentTarget.setPointerCapture(e.pointerId);
-          void beginRecording();
-        }}
-        onPointerUp={() => void endRecording()}
-        onPointerCancel={() => void endRecording()}
+        onClick={onMicClick}
         aria-label={micLabel}
         title={micLabel}
         className={`grid size-9 shrink-0 place-items-center rounded-full transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--glow)] ${
@@ -138,19 +130,29 @@ export default function Composer({
               : "text-[var(--muted)] hover:text-[var(--text)] disabled:opacity-40"
         }`}
       >
-        <Microphone
-          size={16}
-          weight={recording ? "fill" : "light"}
-          className={transcribing ? "animate-pulse" : undefined}
-        />
+        {recording ? (
+          <Stop size={14} weight="fill" />
+        ) : (
+          <Microphone
+            size={16}
+            weight="light"
+            className={transcribing ? "animate-pulse" : undefined}
+          />
+        )}
       </button>
+
+      <Waveform level={level} />
 
       <input
         value={value}
         onChange={(e) => setValue(e.target.value)}
-        disabled={disabled}
+        disabled={disabled || recording}
         placeholder={
-          recording ? "Listening" : transcribing ? "..." : "Say something to Meriza"
+          recording
+            ? "Listening"
+            : transcribing
+              ? "..."
+              : "Say something to Meriza"
         }
         aria-label="Message Meriza"
         autoComplete="off"

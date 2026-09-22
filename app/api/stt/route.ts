@@ -5,8 +5,10 @@ import { WhisperCppProvider } from "@/lib/stt/whisper-cpp";
 
 export const runtime = "nodejs";
 
-/** Roughly a minute of 16kHz mono WAV, well past any single utterance. */
-const MAX_BYTES = 2_000_000;
+/** Five minutes of 16kHz mono WAV at 32kB per second. Well past any single
+ *  utterance, and a cap only so a stuck recorder cannot send something
+ *  enormous. */
+const MAX_BYTES = 10_000_000;
 
 function requireEnv(name: string): string {
   const value = process.env[name];
