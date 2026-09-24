@@ -2,21 +2,24 @@
 
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
+import { resolveInto, shiftColorCss, type PaletteShift } from "@/lib/orb/palette";
 import { fragmentShader, vertexShader } from "@/lib/orb/shaders";
 import { ORB_STATES, type OrbStatePreset } from "@/lib/orb/states";
 import type { MotionFrame } from "@/lib/orb/motion/types";
+import type { StatePalette } from "@/lib/settings/types";
 import type { OrbState } from "@/lib/types";
-import { shiftHue, shiftHueCss } from "@/lib/orb/palette";
 
 interface OrbProps {
   state: OrbState;
+  /** Transforms the preset palette, preserving how the states relate. */
+  shift?: PaletteShift;
+  /** Per-state colours. When present for a state, they replace `shift`. */
+  palette?: Partial<Record<OrbState, StatePalette>>;
   /**
    * Per-frame motion drive, pulled once each rendered frame. Returning a frame
    * overrides amplitude and wobble and can fire a ripple; null falls back to
    * the active state preset. Lets a motion source play in the orb's own loop.
    */
-  /** Rotates the whole palette in degrees, 0 leaves the presets alone. */
-  hueShift?: number;
   onFrame?: (elapsedSeconds: number) => MotionFrame | null;
   /** Fires on a tap or click that lands on the orb surface. */
   onTap?: () => void;
@@ -25,34 +28,51 @@ interface OrbProps {
 const RADIUS = 1.25;
 const WOBBLE_MIN = 1.6;
 const WOBBLE_MAX = 3.4;
+const NO_SHIFT: PaletteShift = { hue: 0, saturation: 1, lightness: 0 };
+
 const clamp = (min: number, max: number, value: number) =>
   Math.max(min, Math.min(max, value));
 const lerp = (a: number, b: number, n: number) => a + (b - a) * n;
 const mapWobble = (w: number) => WOBBLE_MIN + (WOBBLE_MAX - WOBBLE_MIN) * w;
 
-export default function Orb({ state, hueShift = 0, onFrame, onTap }: OrbProps) {
+export default function Orb({
+  state,
+  shift = NO_SHIFT,
+  palette,
+  onFrame,
+  onTap,
+}: OrbProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const haloRef = useRef<HTMLDivElement>(null);
 
   // Mutable values the render loop reads without re-running the setup effect.
   const targetRef = useRef<OrbStatePreset>(ORB_STATES[state]);
-  const hueRef = useRef(hueShift);
+  const stateRef = useRef<OrbState>(state);
+  const shiftRef = useRef<PaletteShift>(shift);
+  const paletteRef = useRef(palette);
   const glowRef = useRef(ORB_STATES[state].glow);
   const onFrameRef = useRef(onFrame);
   const onTapRef = useRef(onTap);
-  
-  useEffect(() => {
-    hueRef.current = hueShift;
-    glowRef.current = shiftHueCss(ORB_STATES[state].glow, hueShift);
-  }, [state, hueShift]);
 
   useEffect(() => {
     targetRef.current = ORB_STATES[state];
+    stateRef.current = state;
   }, [state]);
+
+  useEffect(() => {
+    shiftRef.current = shift;
+    paletteRef.current = palette;
+    // The halo is CSS rather than a uniform, so it resolves here rather than
+    // in the loop. It follows the second colour, which is the brighter end.
+    const custom = palette?.[state];
+    glowRef.current = custom?.b ?? shiftColorCss(ORB_STATES[state].glow, shift);
+  }, [state, shift, palette]);
+
   useEffect(() => {
     onFrameRef.current = onFrame;
   }, [onFrame]);
+
   useEffect(() => {
     onTapRef.current = onTap;
   }, [onTap]);
@@ -221,6 +241,11 @@ export default function Orb({ state, hueShift = 0, onFrame, onTap }: OrbProps) {
     canvas.addEventListener("pointerup", onPointerUp);
     canvas.addEventListener("pointercancel", onPointerCancel);
 
+    // Owned by the loop rather than shared module scratch, since two colours
+    // have to be live at once.
+    const colorA = new THREE.Color();
+    const colorB = new THREE.Color();
+
     const timer = new THREE.Timer();
     let frameId = 0;
     let running = true;
@@ -239,11 +264,11 @@ export default function Orb({ state, hueShift = 0, onFrame, onTap }: OrbProps) {
       // damps the performance and suppresses its ripples.
       const drive = onFrameRef.current?.(uniforms.uTime.value) ?? null;
       // A motion source owns the energy while it plays, so rests dip and peaks
-      // stand out; otherwise amplitude only lifts the state's resting energy.
-      // A driven performance also tracks faster, to read each beat rather than
-      // smearing into a constant level.
+      // stand out. A driven performance also tracks faster, to read each beat
+      // rather than smearing into a constant level.
       const driveEase = drive ? 0.2 : s;
       const energyTarget = drive ? drive.amplitude * motion : target.energy;
+
       uniforms.uEnergy.value = lerp(
         uniforms.uEnergy.value,
         energyTarget,
@@ -275,15 +300,17 @@ export default function Orb({ state, hueShift = 0, onFrame, onTap }: OrbProps) {
         target.wSpeed,
         s,
       );
-      const hue = hueRef.current;
+
+      const custom = paletteRef.current?.[stateRef.current];
       (uniforms.uColorA.value as THREE.Color).lerp(
-        shiftHue(target.colorA, hue),
+        resolveInto(colorA, target.colorA, custom?.a, shiftRef.current),
         s,
       );
       (uniforms.uColorB.value as THREE.Color).lerp(
-        shiftHue(target.colorB, hue),
+        resolveInto(colorB, target.colorB, custom?.b, shiftRef.current),
         s,
       );
+
       autoRot = target.rot * motion;
 
       if (drive?.ripple && !reduced) {

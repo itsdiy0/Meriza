@@ -312,7 +312,12 @@ export default function Home() {
       >
         <Orb
           state={orbState}
-          hueShift={prefs.hueShift}
+          shift={{
+            hue: prefs.hueShift,
+            saturation: prefs.saturation,
+            lightness: prefs.lightness,
+          }}
+          palette={prefs.paletteMode === "custom" ? prefs.palette : undefined}
           onFrame={onFrame}
         />
       </div>
