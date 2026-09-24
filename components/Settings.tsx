@@ -19,6 +19,8 @@ interface SettingsProps extends SettingsHandle {
   onCleared: () => void;
 }
 
+
+
 type Tab = "voice" | "theme" | "data";
 
 const TABS: { id: Tab; label: string; Icon: typeof Palette }[] = [
@@ -27,7 +29,13 @@ const TABS: { id: Tab; label: string; Icon: typeof Palette }[] = [
   { id: "data", label: "Data", Icon: Archive },
 ];
 
-const SWATCH_STATES: OrbState[] = ["idle", "thinking", "waiting", "responding"];
+const SWATCH_STATES: OrbState[] = [
+  "idle",
+  "listening",
+  "waiting",
+  "thinking",
+  "responding",
+];
 
 /** Kokoro encodes language and gender in the id, as `<language><gender>_name`. */
 const LANGUAGES: Record<string, string> = {
@@ -196,9 +204,12 @@ interface ThemePanelProps {
 }
 
 function ThemePanel({ settings, set }: ThemePanelProps) {
-  const { hueShift, saturation, lightness } = settings;
+  const { paletteMode, hueShift, saturation, lightness, palette } = settings;
+  const custom = paletteMode === "custom";
 
-  const swatches = useMemo(() => {
+  // What the sliders produce, shown underneath the pickers as the reference
+  // being deviated from, and used to seed custom mode on entry.
+  const generated = useMemo(() => {
     const shift = { hue: hueShift, saturation, lightness };
     return SWATCH_STATES.map((state) => ({
       state,
@@ -207,68 +218,176 @@ function ThemePanel({ settings, set }: ThemePanelProps) {
     }));
   }, [hueShift, saturation, lightness]);
 
+  const shown = generated.map(({ state, a, b }) => ({
+    state,
+    a: custom ? (palette[state]?.a ?? a) : a,
+    b: custom ? (palette[state]?.b ?? b) : b,
+  }));
+
+  const toCustom = () => {
+    // Seeded from the generated palette, so editing starts from something
+    // coherent rather than from ten blank pickers.
+    if (Object.keys(palette).length === 0) {
+      set(
+        "palette",
+        Object.fromEntries(generated.map(({ state, a, b }) => [state, { a, b }])),
+      );
+    }
+    set("paletteMode", "custom");
+  };
+
+  const paint = (state: OrbState, part: "a" | "b", value: string) => {
+    const current = shown.find((s) => s.state === state);
+    if (current === undefined) return;
+    set("palette", {
+      ...palette,
+      [state]: { a: current.a, b: current.b, [part]: value },
+    });
+  };
+
   return (
-    <div className="flex flex-col gap-6">
-      <Field label="hue" value={`${hueShift}\u00B0`}>
-        <input
-          type="range"
-          min={0}
-          max={360}
-          step={1}
-          value={hueShift}
-          onChange={(e) => set("hueShift", Number(e.target.value))}
-          className="accent-[var(--text)]"
-        />
-      </Field>
-
-      <Field label="saturation" value={`${saturation.toFixed(2)}x`}>
-        <input
-          type="range"
-          min={0}
-          max={2}
-          step={0.05}
-          value={saturation}
-          onChange={(e) => set("saturation", Number(e.target.value))}
-          className="accent-[var(--text)]"
-        />
-      </Field>
-
-      <Field
-        label="lightness"
-        value={
-          lightness === 0
-            ? "0"
-            : `${lightness > 0 ? "+" : ""}${lightness.toFixed(2)}`
-        }
+    <div className="flex flex-col gap-7">
+      <div
+        role="radiogroup"
+        aria-label="Palette"
+        className="flex gap-1 rounded-full border border-[var(--line)] p-1"
       >
-        <input
-          type="range"
-          min={-0.2}
-          max={0.2}
-          step={0.01}
-          value={lightness}
-          onChange={(e) => set("lightness", Number(e.target.value))}
-          className="accent-[var(--text)]"
-        />
-      </Field>
-
-      {/* Each pair is one state, so the contrast between them is what the
-          controls preserve. The orb sits behind a blur while this is open,
-          which makes a legible preview worth having. */}
-      <div className="flex gap-2" aria-hidden>
-        {swatches.map(({ state, a, b }) => (
-          <div
-            key={state}
-            title={state}
-            className="h-8 flex-1 rounded-md"
-            style={{ background: `linear-gradient(135deg, ${a}, ${b})` }}
-          />
+        {(
+          [
+            ["shift", "Generated"],
+            ["custom", "Custom"],
+          ] as const
+        ).map(([mode, label]) => (
+          <button
+            key={mode}
+            type="button"
+            role="radio"
+            aria-checked={paletteMode === mode}
+            onClick={() => (mode === "custom" ? toCustom() : set("paletteMode", "shift"))}
+            className={`flex-1 rounded-full px-3 py-1.5 text-[13px] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--glow)] ${
+              paletteMode === mode
+                ? "bg-[var(--text)] text-[var(--ink)]"
+                : "text-[var(--muted)] hover:text-[var(--text)]"
+            }`}
+          >
+            {label}
+          </button>
         ))}
       </div>
 
+      {custom ? (
+        <div className="flex flex-col gap-3">
+          {shown.map(({ state, a, b }) => (
+            <div key={state} className="flex items-center gap-3">
+              <span className="w-20 shrink-0 font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--muted)]">
+                {state}
+              </span>
+              <input
+                type="color"
+                value={a}
+                onChange={(e) => paint(state, "a", e.target.value)}
+                aria-label={`${state} from`}
+                className="size-7 shrink-0 cursor-pointer rounded border border-[var(--line)] bg-transparent"
+              />
+              <input
+                type="color"
+                value={b}
+                onChange={(e) => paint(state, "b", e.target.value)}
+                aria-label={`${state} to`}
+                className="size-7 shrink-0 cursor-pointer rounded border border-[var(--line)] bg-transparent"
+              />
+              <span
+                aria-hidden
+                className="h-7 min-w-0 flex-1 rounded-md"
+                style={{ background: `linear-gradient(135deg, ${a}, ${b})` }}
+              />
+            </div>
+          ))}
+
+          {/* The generated palette, as the reference being deviated from and
+              as a preview of what switching back would give. */}
+          <div className="mt-2 flex items-center gap-3 opacity-50">
+            <span className="w-20 shrink-0 font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--muted)]">
+              generated
+            </span>
+            {generated.map(({ state, a, b }) => (
+              <span
+                key={state}
+                aria-hidden
+                className="h-5 min-w-0 flex-1 rounded"
+                style={{ background: `linear-gradient(135deg, ${a}, ${b})` }}
+              />
+            ))}
+          </div>
+        </div>
+      ) : (
+        <>
+          <Field label="hue" value={`${hueShift}\u00B0`}>
+            <input
+              type="range"
+              min={0}
+              max={360}
+              step={1}
+              value={hueShift}
+              onChange={(e) => set("hueShift", Number(e.target.value))}
+              className="accent-[var(--text)]"
+            />
+          </Field>
+
+          <Field label="saturation" value={`${saturation.toFixed(2)}x`}>
+            <input
+              type="range"
+              min={0}
+              max={2}
+              step={0.05}
+              value={saturation}
+              onChange={(e) => set("saturation", Number(e.target.value))}
+              className="accent-[var(--text)]"
+            />
+          </Field>
+
+          <Field
+            label="lightness"
+            value={
+              lightness === 0
+                ? "0"
+                : `${lightness > 0 ? "+" : ""}${lightness.toFixed(2)}`
+            }
+          >
+            <input
+              type="range"
+              min={-0.2}
+              max={0.2}
+              step={0.01}
+              value={lightness}
+              onChange={(e) => set("lightness", Number(e.target.value))}
+              className="accent-[var(--text)]"
+            />
+          </Field>
+
+          {/* Ordered by when each occurs in a turn, so the row reads as a
+              sequence. Labelled because a row of gradients does not say which
+              state is which, and hover titles are invisible on touch. */}
+          <div className="flex gap-2" aria-hidden>
+            {generated.map(({ state, a, b }) => (
+              <div key={state} className="flex min-w-0 flex-1 flex-col gap-1.5">
+                <div
+                  className="h-9 rounded-md"
+                  style={{ background: `linear-gradient(135deg, ${a}, ${b})` }}
+                />
+                <span className="truncate text-center font-mono text-[9px] uppercase tracking-[0.1em] text-[var(--muted)]">
+                  {state}
+                </span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
       <p className="text-[13px] text-[var(--muted)]">
-        Adjusts the whole palette. Idle, thinking, waiting and speaking keep
-        their relative colours.
+        {custom
+          ? "Your colours, kept separately from the sliders. Switching back does not lose them."
+          : "Moves the whole palette and keeps the states related to each other."}
       </p>
     </div>
   );
@@ -417,8 +536,8 @@ export default function Settings({
         aria-label="Settings"
         tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
-        className="animate-message-in relative flex w-full max-w-lg gap-6 rounded-2xl border border-[var(--line)] bg-[color-mix(in_srgb,var(--ink-2)_92%,transparent)] p-6 shadow-2xl focus:outline-none"
-      >
+               className="animate-message-in relative flex w-full max-w-xl gap-8 rounded-2xl border border-[var(--line)] bg-[color-mix(in_srgb,var(--ink-2)_92%,transparent)] p-8 shadow-2xl focus:outline-none"
+       >
         <div
           role="tablist"
           aria-orientation="vertical"

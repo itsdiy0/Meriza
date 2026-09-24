@@ -64,3 +64,26 @@ export function shiftColor(hex: number, shift: PaletteShift): THREE.Color {
     Math.min(1, Math.max(0, hsl.l + shift.lightness)),
   );
 }
+
+/**
+ * Writes a state's colour into `target`: the custom one when supplied, the
+ * transformed preset otherwise.
+ *
+ * Writes into a caller-owned instance rather than returning a shared one,
+ * since the render loop needs two colours live at once.
+ */
+export function resolveInto(
+  target: THREE.Color,
+  hex: number,
+  custom: string | undefined,
+  shift: PaletteShift,
+): THREE.Color {
+  if (custom !== undefined) return target.set(custom);
+
+  target.setHex(hex).getHSL(hsl);
+  return target.setHSL(
+    (hsl.h + shift.hue / 360) % 1,
+    Math.min(1, hsl.s * shift.saturation),
+    Math.min(1, Math.max(0, hsl.l + shift.lightness)),
+  );
+}
