@@ -457,12 +457,9 @@ that did not work.
 **The palette is transformed, never replaced.** `ORB_STATES` is tuned as a
 set: cool teal at rest, violet while thinking, warm amber while speaking. That
 progression is how a state change reads at a glance, without anyone learning
-what the colours mean. So theme control is hue rotation, a saturation
-multiplier, and a lightness offset, all applied identically to every state.
-
-Per-state colour pickers were the obvious alternative and were rejected: they
-let all four states be set to the same blue, which silently removes the signal.
-Preserving the relationships matters more than absolute control.
+what the colours mean. So the default theme control is hue rotation, a
+saturation multiplier, and a lightness offset, all applied identically to every
+state.
 
 The operations differ because the properties do. Saturation multiplies, so 0 is
 a genuinely grey orb and 1 leaves the presets untouched; offsetting would push
@@ -470,7 +467,24 @@ every state toward the same saturation and flatten the contrast. Lightness
 offsets, because multiplying a value already near zero barely moves it while a
 bright one blows out. Hue wraps, being circular.
 
+**Custom colours are a separate mode, not holes in the transform.** *Revised.*
+Per-state pickers were first rejected outright, on the grounds that they let
+all five states be set to the same colour and silently remove the signal. That
+reasoning holds for the default, and generated is still what you land in.
+
+What makes the exception safe is that the two modes do not interact. Sliders
+are ignored in custom mode and picks are ignored in generated mode, so
+switching away loses neither and there is always a way back to a coherent
+palette. Custom seeds from the generated one on entry rather than starting
+empty, since ten blank pickers is not a starting point anyone finishes, and
+the generated palette stays visible underneath as the reference being
+deviated from.
+
+The earlier design was worse than either: overrides punched into the
+transform, cleared whenever a slider moved. That made the escape hatch
+destructive and the state of the palette hard to reason about.
+
 Note the colour helpers reuse module-level scratch objects, because
 `Color.getHSL` writes into a target you pass rather than allocating, and these
-run in the render loop. The returned colour is therefore shared: read it before
-calling again, or clone it.
+run in the render loop. `resolveInto` is the exception and writes into a
+caller-owned instance, since the loop needs two colours live at once.
