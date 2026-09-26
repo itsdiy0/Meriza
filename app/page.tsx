@@ -384,6 +384,8 @@ export default function Home() {
         onSend={send}
         onInterrupt={stop}
         onListening={onListening}
+        threshold={prefs.vadThreshold}
+        hangoverMs={prefs.vadHangoverMs}
       />
 
       <Settings

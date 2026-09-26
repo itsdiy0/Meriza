@@ -14,6 +14,10 @@ interface TalkModeProps {
   onInterrupt: () => void;
   /** Mirrors the microphone state to the orb. */
   onListening: (listening: boolean) => void;
+  /** Level above which audio counts as speech. */
+  threshold: number;
+  /** Silence before an utterance is considered finished. */
+  hangoverMs: number;
 }
 
 type Phase = "idle" | "hearing" | "sending" | "denied";
@@ -27,10 +31,10 @@ type Phase = "idle" | "hearing" | "sending" | "denied";
  * never hold long enough to clear the detector's onset. That was tested
  * rather than assumed, including with a speaker beside the microphone.
  *
- * The recorder runs continuously and is restarted per utterance rather than
- * buffered, which loses the onset window at the very start of each one. In
- * practice whisper recovers the first word from context, and the alternative
- * is holding a rolling buffer for a problem that has not appeared.
+ * The microphone is never closed between utterances. An earlier version
+ * released and reacquired it each time, which left several hundred
+ * milliseconds of deafness and swallowed the start of anything said quickly
+ * after a reply.
  */
 export default function TalkMode({
   open,
@@ -38,15 +42,22 @@ export default function TalkMode({
   onSend,
   onInterrupt,
   onListening,
+  threshold,
+  hangoverMs,
 }: TalkModeProps) {
   const [phase, setPhase] = useState<Phase>("idle");
 
   const recorderRef = useRef<Recorder | null>(null);
   const vadRef = useRef<Vad | null>(null);
-  // Held in a ref so the detector's callbacks, created once, always reach the
-  // current handlers rather than the ones from the render that started it.
+
+  // Held in refs so the detector's callbacks, created once when listening
+  // starts, always reach the current values rather than those from the render
+  // that created them.
   const handlersRef = useRef({ onSend, onInterrupt });
   handlersRef.current = { onSend, onInterrupt };
+
+  const tuningRef = useRef({ threshold, hangoverMs });
+  tuningRef.current = { threshold, hangoverMs };
 
   const teardown = useCallback(() => {
     vadRef.current?.stop();
@@ -58,10 +69,7 @@ export default function TalkMode({
   }, [onListening]);
 
   useEffect(() => {
-    if (!open) {
-      teardown();
-      return;
-    }
+    if (!open) return;
 
     let live = true;
 
@@ -82,33 +90,51 @@ export default function TalkMode({
       recorderRef.current = recorder;
       onListening(true);
 
-      vadRef.current = createVad(recorder.level, {
-        onStart: () => {
-          // Everything before the utterance is room noise, and carrying it
-          // would put a long silence in front of every transcription.
-          recorder.flush();
-          setPhase("hearing");
-          handlersRef.current.onInterrupt();
-        },
-        onEnd: () => {
-          // The microphone stays open, so the next utterance can begin in the
-          // same breath as this one ending.
-          const audio = recorder.take();
-          setPhase("sending");
-          if (audio === null) return;
+      vadRef.current = createVad(
+        recorder.level,
+        {
+          onStart: () => {
+            // Everything before the utterance is room noise, and carrying it
+            // would put a long silence in front of every transcription.
+            recorder.flush();
+            setPhase("hearing");
+            // Speaking interrupts. This is what the whole mode is for.
+            handlersRef.current.onInterrupt();
+          },
+          onEnd: () => {
+            // Taken rather than stopped, so the next utterance can begin in
+            // the same breath as this one ending.
+            const audio = recorder.take();
+            setPhase("sending");
+            if (audio === null) {
+              setPhase("idle");
+              return;
+            }
 
-          void transcribe(audio)
-            .then((text) => {
-              if (text !== "" && live) handlersRef.current.onSend(text);
-            })
-            .catch((error) => {
-              console.error("Could not transcribe:", error);
-            })
-            .finally(() => {
-              if (live) setPhase("idle");
-            });
+            void transcribe(audio)
+              .then((text) => {
+                if (text !== "" && live) handlersRef.current.onSend(text);
+              })
+              .catch((error) => {
+                console.error("Could not transcribe:", error);
+              })
+              .finally(() => {
+                if (live) setPhase("idle");
+              });
+          },
         },
-      });
+        // Getters rather than a plain object, so moving a slider in settings
+        // retunes without leaving talk mode.
+        {
+          ...DEFAULT_VAD,
+          get threshold() {
+            return tuningRef.current.threshold;
+          },
+          get hangoverMs() {
+            return tuningRef.current.hangoverMs;
+          },
+        },
+      );
     };
 
     void listen();

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Archive, Palette, SpeakerHigh, X } from "@phosphor-icons/react";
+import { Archive, Ear, Palette, SpeakerHigh, X } from "@phosphor-icons/react";
 import { shiftColorCss } from "@/lib/orb/palette";
 import { ORB_STATES } from "@/lib/orb/states";
 import { downloadBackup } from "@/lib/storage/backup";
@@ -19,12 +19,11 @@ interface SettingsProps extends SettingsHandle {
   onCleared: () => void;
 }
 
-
-
-type Tab = "voice" | "theme" | "data";
+type Tab = "voice" | "listening" | "theme" | "data";
 
 const TABS: { id: Tab; label: string; Icon: typeof Palette }[] = [
   { id: "voice", label: "Voice", Icon: SpeakerHigh },
+  { id: "listening", label: "Listening", Icon: Ear },
   { id: "theme", label: "Theme", Icon: Palette },
   { id: "data", label: "Data", Icon: Archive },
 ];
@@ -150,7 +149,7 @@ function VoicePanel({
   speaking,
 }: VoicePanelProps) {
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-7">
       <Field label="speaker">
         {failed ? (
           <span className="text-[13px] text-[var(--muted)]">
@@ -198,6 +197,74 @@ function VoicePanel({
   );
 }
 
+interface ListeningPanelProps {
+  settings: SettingsHandle["settings"];
+  set: SettingsHandle["set"];
+}
+
+/**
+ * Two of the detector's four parameters, the two that genuinely depend on
+ * circumstance: the threshold on the room, the pause on how the person speaks.
+ *
+ * Onset and the minimum stay constants. Onset is the transient guard that
+ * keeps Meriza from hearing her own voice through the speakers, so exposing it
+ * would invite breaking barge-in for a setting nobody can reason about.
+ */
+function ListeningPanel({ settings, set }: ListeningPanelProps) {
+  const { vadThreshold, vadHangoverMs } = settings;
+
+  return (
+    <div className="flex flex-col gap-7">
+      <Field label="sensitivity" value={vadThreshold.toFixed(3)}>
+        <>
+          <input
+            type="range"
+            min={0.01}
+            max={0.3}
+            step={0.005}
+            // Inverted, so dragging right means more sensitive rather than
+            // requiring a louder voice.
+            value={0.31 - vadThreshold}
+            onChange={(e) => set("vadThreshold", 0.31 - Number(e.target.value))}
+            className="accent-[var(--text)]"
+          />
+          <span className="text-[13px] text-[var(--muted)]">
+            Raise it if Meriza misses you. Lower it if she reacts to noise in
+            the room.
+          </span>
+        </>
+      </Field>
+
+      <Field
+        label="pause before replying"
+        value={`${(vadHangoverMs / 1000).toFixed(2)}s`}
+      >
+        <>
+          <input
+            type="range"
+            min={300}
+            max={2500}
+            step={50}
+            value={vadHangoverMs}
+            onChange={(e) => set("vadHangoverMs", Number(e.target.value))}
+            className="accent-[var(--text)]"
+          />
+          <span className="text-[13px] text-[var(--muted)]">
+            How long a silence means you have finished. Too short and she cuts
+            you off mid-thought; too long and every reply feels slow.
+          </span>
+        </>
+      </Field>
+
+      <p className="text-[13px] text-[var(--muted)]">
+        Only used in talk mode. There is a live meter at{" "}
+        <code className="font-mono text-[12px]">/lab/vad</code> if you want to
+        watch these while you tune them.
+      </p>
+    </div>
+  );
+}
+
 interface ThemePanelProps {
   settings: SettingsHandle["settings"];
   set: SettingsHandle["set"];
@@ -230,7 +297,9 @@ function ThemePanel({ settings, set }: ThemePanelProps) {
     if (Object.keys(palette).length === 0) {
       set(
         "palette",
-        Object.fromEntries(generated.map(({ state, a, b }) => [state, { a, b }])),
+        Object.fromEntries(
+          generated.map(({ state, a, b }) => [state, { a, b }]),
+        ),
       );
     }
     set("paletteMode", "custom");
@@ -263,7 +332,9 @@ function ThemePanel({ settings, set }: ThemePanelProps) {
             type="button"
             role="radio"
             aria-checked={paletteMode === mode}
-            onClick={() => (mode === "custom" ? toCustom() : set("paletteMode", "shift"))}
+            onClick={() =>
+              mode === "custom" ? toCustom() : set("paletteMode", "shift")
+            }
             className={`flex-1 rounded-full px-3 py-1.5 text-[13px] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--glow)] ${
               paletteMode === mode
                 ? "bg-[var(--text)] text-[var(--ink)]"
@@ -403,7 +474,7 @@ function DataPanel({ onCleared, onClose }: DataPanelProps) {
   const [busy, setBusy] = useState(false);
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-7">
       <Section
         label="export"
         hint="Every conversation as JSON. This is the only copy that survives clearing your browser data or moving to another machine."
@@ -536,12 +607,12 @@ export default function Settings({
         aria-label="Settings"
         tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
-               className="animate-message-in relative flex w-full max-w-xl gap-8 rounded-2xl border border-[var(--line)] bg-[color-mix(in_srgb,var(--ink-2)_92%,transparent)] p-8 shadow-2xl focus:outline-none"
-       >
+        className="animate-message-in relative flex w-full max-w-xl gap-8 rounded-2xl border border-[var(--line)] bg-[color-mix(in_srgb,var(--ink-2)_92%,transparent)] p-8 shadow-2xl focus:outline-none"
+      >
         <div
           role="tablist"
           aria-orientation="vertical"
-          className="flex w-28 shrink-0 flex-col gap-1"
+          className="flex w-32 shrink-0 flex-col gap-1"
         >
           {TABS.map(({ id, label, Icon }) => {
             const active = id === tab;
@@ -582,7 +653,7 @@ export default function Settings({
 
           {/* Each panel is its own component, so a tab that owns local state
               gets it for free and the switch below stays a switch rather than
-              three bodies inlined in one ternary. */}
+              four bodies inlined in one ternary. */}
           {tab === "voice" && (
             <VoicePanel
               settings={settings}
@@ -591,6 +662,9 @@ export default function Settings({
               failed={failed}
               speaking={speaking}
             />
+          )}
+          {tab === "listening" && (
+            <ListeningPanel settings={settings} set={set} />
           )}
           {tab === "theme" && <ThemePanel settings={settings} set={set} />}
           {tab === "data" && (
