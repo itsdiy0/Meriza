@@ -15,6 +15,7 @@ import { createRevealer, type Revealer } from "@/lib/transcript/reveal";
 import type { ChatStreamChunk, Message, OrbState } from "@/lib/types";
 import Conversations from "@/components/Conversations";
 import { ChatsCircle } from "@phosphor-icons/react";
+import TalkMode from "@/components/TalkMode";
 
 const newId = () => crypto.randomUUID();
 
@@ -44,6 +45,8 @@ export default function Home() {
     remove,
     title
   } = useConversation();
+
+  const [talking, setTalking] = useState(false);
 
   const onListening = useCallback(
     (open: boolean) => {
@@ -361,16 +364,27 @@ export default function Home() {
           </div>
         </div>
         <div className="px-4 pb-[calc(env(safe-area-inset-bottom)+16px)] pt-2">
-          <Composer
-            onSend={send}
-            onStop={stop}
-            onSettings={() => setSettingsOpen(true)}
-            active={generating || speaking}
-            disabled={conversationId === null}
-            onListening={onListening}
-          />
+          {!talking && (
+            <Composer
+              onSend={send}
+              onStop={stop}
+              onSettings={() => setSettingsOpen(true)}
+              onTalkMode={() => setTalking(true)}
+              onListening={onListening}
+              active={generating || speaking}
+              disabled={conversationId === null}
+            />
+          )}
         </div>
       </div>
+      
+      <TalkMode
+        open={talking}
+        onClose={() => setTalking(false)}
+        onSend={send}
+        onInterrupt={stop}
+        onListening={onListening}
+      />
 
       <Settings
         {...settings}
@@ -379,6 +393,8 @@ export default function Home() {
         onCleared={startNew}
         speaking={speaking}
       />
+
+      
       
         <Conversations
         open={listOpen}
