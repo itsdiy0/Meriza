@@ -84,39 +84,31 @@ export default function TalkMode({
 
       vadRef.current = createVad(recorder.level, {
         onStart: () => {
+          // Everything before the utterance is room noise, and carrying it
+          // would put a long silence in front of every transcription.
+          recorder.flush();
           setPhase("hearing");
-          // Speaking interrupts. This is what the whole mode is for.
           handlersRef.current.onInterrupt();
         },
         onEnd: () => {
+          // The microphone stays open, so the next utterance can begin in the
+          // same breath as this one ending.
+          const audio = recorder.take();
           setPhase("sending");
-          void restart();
+          if (audio === null) return;
+
+          void transcribe(audio)
+            .then((text) => {
+              if (text !== "" && live) handlersRef.current.onSend(text);
+            })
+            .catch((error) => {
+              console.error("Could not transcribe:", error);
+            })
+            .finally(() => {
+              if (live) setPhase("idle");
+            });
         },
       });
-    };
-
-    /**
-     * Closes the current recording, sends it, and opens the next one. The
-     * microphone is released and reacquired between utterances, which is a
-     * hundred milliseconds of deafness in exchange for not holding a buffer
-     * that grows for the life of the session.
-     */
-    const restart = async () => {
-      const previous = recorderRef.current;
-      vadRef.current?.stop();
-      vadRef.current = null;
-      recorderRef.current = null;
-
-      const audio = previous === null ? null : await previous.stop();
-      if (live) await listen();
-
-      if (audio === null) return;
-      try {
-        const text = await transcribe(audio);
-        if (text !== "" && live) handlersRef.current.onSend(text);
-      } catch (error) {
-        console.error("Could not transcribe:", error);
-      }
     };
 
     void listen();
