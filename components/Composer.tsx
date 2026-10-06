@@ -5,11 +5,13 @@ import { Gear, Microphone, PaperPlaneRight, Stop } from "@phosphor-icons/react";
 import { startRecording, type Recorder } from "@/lib/audio/record";
 import { transcribe } from "@/lib/stt/transcribe";
 import Waveform from "@/components/Waveform";
+import { Waveform as WaveformIcon } from "@phosphor-icons/react";
 
 interface ComposerProps {
   onSend: (text: string) => void;
   onStop: () => void;
   onSettings: () => void;
+  onTalkMode: () => void;
   /** Fires when the microphone opens and closes, for the orb. */
   onListening: (listening: boolean) => void;
   /** True while Meriza is generating or speaking. */
@@ -21,6 +23,7 @@ export default function Composer({
   onSend,
   onStop,
   onSettings,
+  onTalkMode,
   onListening,
   active,
   disabled = false,
@@ -139,6 +142,17 @@ export default function Composer({
             className={transcribing ? "animate-pulse" : undefined}
           />
         )}
+      </button>
+
+      <button
+        type="button"
+        onClick={onTalkMode}
+        disabled={disabled}
+        aria-label="Talk mode"
+        title="Talk mode"
+        className="grid size-9 shrink-0 place-items-center rounded-full text-[var(--muted)] transition-colors hover:text-[var(--text)] disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--glow)]"
+      >
+        <WaveformIcon size={16} weight="light" />
       </button>
 
       <Waveform level={level} />

@@ -31,6 +31,11 @@ export interface Settings {
    *  rather than left empty, since ten blank pickers is not a starting point
    *  anyone finishes. */
   palette: Partial<Record<OrbState, StatePalette>>;
+  /** Level above which audio counts as speech. Depends on the room. */
+  vadThreshold: number;
+  /** Silence before an utterance is considered finished. Depends on how the
+  *  person pauses. */
+  vadHangoverMs: number;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -42,4 +47,7 @@ export const DEFAULT_SETTINGS: Settings = {
   saturation: 1,
   lightness: 0,
   palette: {},
+  vadThreshold: 0.08,
+  vadHangoverMs: 800,
 };
+

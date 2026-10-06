@@ -5,6 +5,14 @@ const FRAME = 4096;
 export interface Recorder {
   /** Live 0..1 level, for driving the orb while listening. */
   level(): number;
+  /**
+   * Takes everything captured since the last call, as WAV. The microphone
+   * stays open, so there is no gap between one utterance and the next.
+   * Null when nothing was captured.
+   */
+  take(): Blob | null;
+  /** Discards everything captured so far, keeping the microphone open. */
+  flush(): void;
   /** Ends the recording and returns it as WAV. Null if nothing was captured. */
   stop(): Promise<Blob | null>;
   /** Ends the recording and discards it. */
@@ -114,6 +122,21 @@ export async function startRecording(): Promise<Recorder> {
     void ctx.close();
   };
 
+  const drain = (): Blob | null => {
+    const total = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+    if (total === 0) return null;
+
+    const joined = new Float32Array(total);
+    let at = 0;
+    for (const chunk of chunks) {
+      joined.set(chunk, at);
+      at += chunk.length;
+    }
+    chunks.length = 0;
+
+    return encodeWav(resample(joined, ctx.sampleRate));
+  };
+
   return {
     level() {
       analyser.getByteTimeDomainData(time);
@@ -125,21 +148,16 @@ export async function startRecording(): Promise<Recorder> {
       return Math.min(1, Math.sqrt(sum / time.length) * 4);
     },
 
+    take: drain,
+
+    flush() {
+      chunks.length = 0;
+    },
+
     async stop() {
-      const rate = ctx.sampleRate;
+      const audio = drain();
       release();
-
-      const total = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
-      if (total === 0) return null;
-
-      const joined = new Float32Array(total);
-      let at = 0;
-      for (const chunk of chunks) {
-        joined.set(chunk, at);
-        at += chunk.length;
-      }
-
-      return encodeWav(resample(joined, rate));
+      return audio;
     },
 
     cancel: release,
